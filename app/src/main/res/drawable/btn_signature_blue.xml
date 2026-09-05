@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#e9e1ff"> <!-- 누를 때 하늘색으로 반짝임 -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#c6b7ec" /> <!-- 스마트한 애플 블루 색상 -->
+            <corners android:radius="10dp" />
+        </shape>
+    </item>
+</ripple>

@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="360dp"
+    android:layout_height="wrap_content"
+    android:layout_gravity="center"
+    android:background="#FFFFFF"
+    android:orientation="vertical"
+    android:padding="30dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="K&amp;P ADMIN CENTER"
+        android:textColor="#0F172A"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.03"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="6dp"/>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="시스템 관리자 전용 인증 패널"
+        android:textColor="#64748B"
+        android:textSize="12sp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="28dp"/>
+
+    <EditText
+        android:id="@+id/et_password"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:hint="ACCESS CODE"
+        android:textColorHint="#94A3B8"
+        android:textColor="#0F172A"
+        android:inputType="textPassword"
+        android:background="@android:drawable/edit_text"
+        android:backgroundTint="#F1F5F9"
+        android:paddingLeft="16dp"
+        android:paddingRight="16dp"
+        android:textSize="14sp"
+        android:gravity="center"
+        android:letterSpacing="0.1"
+        android:layout_marginBottom="24dp"/>
+
+    <Button
+        android:id="@+id/btn_clear_cache"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:text="🔄 웹 캐시 초기화 및 새로고침"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:backgroundTint="#2563EB"
+        android:layout_marginBottom="10dp"/>
+
+    <Button
+        android:id="@+id/btn_reset"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:text="🔧 키오스크 앱 재시작"
+        android:textColor="#2563EB"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:backgroundTint="#EFF6FF"
+        android:layout_marginBottom="10dp"/>
+
+    <Button
+        android:id="@+id/btn_exit"
+        android:layout_width="match_parent"
+        android:layout_height="52dp"
+        android:text="⚙️ 태블릿 단말기 설정"
+        android:textColor="#475569"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:backgroundTint="#F8FAFC"
+        android:layout_marginBottom="24dp"/>
+
+    <TextView
+        android:id="@+id/btn_cancel"
+        android:layout_width="120dp"
+        android:layout_height="48dp"
+        android:text="CANCEL"
+        android:textColor="#94A3B8"
+        android:textSize="12sp"
+        android:letterSpacing="0.05"
+        android:layout_gravity="center_horizontal"
+        android:gravity="center"
+        android:clickable="true"
+        android:focusable="true"/>
+
+</LinearLayout>
