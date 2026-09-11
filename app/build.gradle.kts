@@ -24,6 +24,21 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // 🔑 릴리스 서명 — keystore 파일은 절대 커밋하지 않고, 환경 변수(로컬 실행 시) 또는
+    // GitHub Actions Secrets(CI 실행 시)로만 전달합니다. 값이 없으면 release 빌드가
+    // 서명 없이 실패하도록 두어, 실수로 서명 안 된 apk가 나오는 걸 막습니다.
+    val releaseKeystorePath = System.getenv("KEYSTORE_PATH")
+    if (!releaseKeystorePath.isNullOrBlank()) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             // 💡 웹뷰 앱은 찌꺼기 코드가 없어 true로 두면 알아서 엄청나게 가벼워집니다!
@@ -32,6 +47,10 @@ android {
 
             // 2번 파일(proguard)이 없어도 에러가 나지 않도록 기본 규칙만 가리킵니다.
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+
+            if (!releaseKeystorePath.isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
