@@ -172,13 +172,24 @@ public class MainActivity extends AppCompatActivity {
             updateBatteryStatusText();
 
             // 🔄 당겨서 새로고침 리스너
+            // WebView는 NestedScrollingChild를 구현하지 않아 SwipeRefreshLayout이 제스처를
+            // 가로챌지 판단할 때 getScrollY() 값이 터치 이벤트와 정확히 동기화되지 않는
+            // 경우가 있다 — 이 때문에 맨 위가 아닌 곳에서 위로 스크롤(아래로 쓸어내리는
+            // 제스처)해도 새로고침이 발동하는 문제가 생긴다. canScrollVertically(-1)로
+            // 판단을 대체하고, 스크롤 위치에 따라 아예 제스처 자체를 껐다 켰다 해서
+            // 스크롤 맨 위에서만 당겨서 새로고침이 가능하도록 이중으로 막는다.
             if (swipeRefreshLayout != null) {
                 swipeRefreshLayout.setOnRefreshListener(() -> {
                     if (webView != null) {
                         webView.reload();
                     }
                 });
-                swipeRefreshLayout.setOnChildScrollUpCallback((parent, child) -> webView.getScrollY() > 0);
+                swipeRefreshLayout.setOnChildScrollUpCallback((parent, child) -> webView.canScrollVertically(-1));
+
+                if (webView != null) {
+                    webView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) ->
+                            swipeRefreshLayout.setEnabled(scrollY == 0));
+                }
             }
 
             // 🏠 플로팅 홈 버튼 클릭 시 세션 유지 이동
