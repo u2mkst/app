@@ -18,8 +18,8 @@ android {
         targetSdk = 34
 
         // 덮어쓰기 설치가 가능하도록 버전 상향
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

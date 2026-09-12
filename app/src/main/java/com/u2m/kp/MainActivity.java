@@ -71,6 +71,13 @@ public class MainActivity extends AppCompatActivity {
     private SwipeRefreshLayout swipeRefreshLayout;
     private Button homeFloatingButton;
 
+    // 📶 얇은 상단 상태 바 (시각 / 배터리 / 네트워크)
+    private TextView tvClock;
+    private TextView tvBattery;
+    private TextView tvNetworkStatus;
+    private final Handler clockHandler = new Handler(Looper.getMainLooper());
+    private Runnable clockRunnable;
+
     // 자동 로그인 계정 저장 변수
     private String savedU2mId = "";
     private String savedPhone = "";
@@ -130,10 +137,39 @@ public class MainActivity extends AppCompatActivity {
             webView = findViewById(R.id.webView);
             swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
             homeFloatingButton = findViewById(R.id.btnHome);
+            tvClock = findViewById(R.id.tvClock);
+            tvBattery = findViewById(R.id.tvBattery);
+            tvNetworkStatus = findViewById(R.id.tvNetworkStatus);
 
             if (webView == null) {
                 throw new NullPointerException("❌ [XML 매칭 실패] activity_main.xml에 'webView' ID가 존재하지 않습니다.");
             }
+
+            // 🕒 상단 상태 바 시계 (1초마다 갱신)
+            if (tvClock != null) {
+                clockRunnable = new Runnable() {
+                    @Override
+                    public void run() {
+                        tvClock.setText(new java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(new java.util.Date()));
+                        clockHandler.postDelayed(this, 1000);
+                    }
+                };
+                clockHandler.post(clockRunnable);
+            }
+
+            // 📶 상단 상태 바 네트워크 아이콘 탭 시 네트워크 설정 화면으로 이동
+            if (tvNetworkStatus != null) {
+                tvNetworkStatus.setOnClickListener(v -> {
+                    try {
+                        startActivity(new Intent(Settings.ACTION_WIRELESS_SETTINGS));
+                    } catch (Exception e) {
+                        startActivity(new Intent(Settings.ACTION_SETTINGS));
+                    }
+                });
+                updateNetworkStatusIcon();
+            }
+
+            updateBatteryStatusText();
 
             // 🔄 당겨서 새로고침 리스너
             if (swipeRefreshLayout != null) {
@@ -461,6 +497,10 @@ public class MainActivity extends AppCompatActivity {
                     int status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
                     boolean isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL;
 
+                    if (tvBattery != null) {
+                        tvBattery.setText((isCharging ? "⚡ " : "🔋 ") + batteryPct + "%");
+                    }
+
                     if (batteryPct <= 15 && !isCharging && !isLowBatteryWarned) {
                         isLowBatteryWarned = true;
                         new AlertDialog.Builder(MainActivity.this)
@@ -508,17 +548,63 @@ public class MainActivity extends AppCompatActivity {
                     @Override
                     public void onAvailable(Network network) {
                         runOnUiThread(() -> {
+                            updateNetworkStatusIcon();
                             if (webView != null && webView.getUrl() != null && webView.getUrl().contains("wifi_error.png")) {
                                 Toast.makeText(MainActivity.this, "📶 인터넷이 재연결되었습니다. 페이지를 새로고칩니다.", Toast.LENGTH_SHORT).show();
                                 webView.reload();
                             }
                         });
                     }
+
+                    @Override
+                    public void onLost(Network network) {
+                        runOnUiThread(MainActivity.this::updateNetworkStatusIcon);
+                    }
                 };
                 cm.registerNetworkCallback(request, networkCallback);
             }
         } catch (Exception e) {
             Log.e(TAG, "네트워크 모니터링 등록 실패: " + e.getMessage());
+        }
+    }
+
+    // 📶 상단 상태 바의 네트워크 아이콘을 현재 연결 상태로 갱신
+    private void updateNetworkStatusIcon() {
+        if (tvNetworkStatus == null) return;
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            NetworkCapabilities capabilities = cm != null ? cm.getNetworkCapabilities(cm.getActiveNetwork()) : null;
+
+            if (capabilities == null || !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                tvNetworkStatus.setText("📴");
+            } else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                tvNetworkStatus.setText("📶");
+            } else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
+                tvNetworkStatus.setText("📱");
+            } else {
+                tvNetworkStatus.setText("🌐");
+            }
+        } catch (Exception e) {
+            tvNetworkStatus.setText("📴");
+        }
+    }
+
+    // 🔋 상단 상태 바의 배터리 표시를 현재 잔량으로 초기화
+    private void updateBatteryStatusText() {
+        if (tvBattery == null) return;
+        try {
+            IntentFilter filter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+            Intent batteryStatus = registerReceiver(null, filter);
+            if (batteryStatus != null) {
+                int level = batteryStatus.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+                int scale = batteryStatus.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+                int status = batteryStatus.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+                boolean isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL;
+                int batteryPct = (int) ((level / (float) scale) * 100);
+                tvBattery.setText((isCharging ? "⚡ " : "🔋 ") + batteryPct + "%");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "배터리 상태 초기화 실패: " + e.getMessage());
         }
     }
 
@@ -1000,6 +1086,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (idleHandler != null && idleRunnable != null) idleHandler.removeCallbacks(idleRunnable);
+        if (clockRunnable != null) clockHandler.removeCallbacks(clockRunnable);
         stopCountDown();
     }
 }
