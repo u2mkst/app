@@ -66,7 +66,6 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "KioskWebViewJS";
     private static final String ADMIN_PASSWORD = "kstadmin";
-    private static final int MAX_SAFE_VOLUME_PERCENT = 70; // 최대 볼륨 제한 (70%)
 
     private WebView webView;
     private SwipeRefreshLayout swipeRefreshLayout;
@@ -87,7 +86,6 @@ public class MainActivity extends AppCompatActivity {
     // 시스템 브로드캐스트 리시버 및 네트워크 모니터링
     private BroadcastReceiver screenOffReceiver = null;
     private BroadcastReceiver headsetPlugReceiver = null;
-    private BroadcastReceiver volumeChangeReceiver = null;
     private BroadcastReceiver batteryReceiver = null;
     private BroadcastReceiver downloadCompleteReceiver = null;
     private ConnectivityManager.NetworkCallback networkCallback = null;
@@ -197,8 +195,10 @@ public class MainActivity extends AppCompatActivity {
                 cookieManager.setAcceptThirdPartyCookies(webView, true);
             }
 
+            // 구글이 "; wv" 토큰으로 임베디드 웹뷰를 감지해 reCAPTCHA/로그인 등을 차단하므로
+            // 커스텀 문자열은 덧붙이지 않고 표준 크롬 브라우저처럼 보이도록 wv 토큰만 제거한다.
             String defaultUserAgent = webSettings.getUserAgentString();
-            webSettings.setUserAgentString(defaultUserAgent + " Chrome/Mobile KioskApp");
+            webSettings.setUserAgentString(defaultUserAgent.replace("; wv", ""));
 
             webView.setWebChromeClient(new WebChromeClient() {
                 @Override
@@ -450,25 +450,6 @@ public class MainActivity extends AppCompatActivity {
             }
         };
 
-        volumeChangeReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                if ("android.media.VOLUME_CHANGED_ACTION".equals(intent.getAction())) {
-                    AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-                    if (am != null) {
-                        int maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-                        int currentVol = am.getStreamVolume(AudioManager.STREAM_MUSIC);
-                        int limitVol = (int) (maxVol * (MAX_SAFE_VOLUME_PERCENT / 100.0));
-
-                        if (currentVol > limitVol) {
-                            am.setStreamVolume(AudioManager.STREAM_MUSIC, limitVol, 0);
-                            Toast.makeText(MainActivity.this, "🔊 청력 보호를 위해 최대 음량이 제한됩니다. (" + MAX_SAFE_VOLUME_PERCENT + "%)", Toast.LENGTH_SHORT).show();
-                        }
-                    }
-                }
-            }
-        };
-
         batteryReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
@@ -506,13 +487,11 @@ public class MainActivity extends AppCompatActivity {
 
         IntentFilter screenOffFilter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
         IntentFilter headsetFilter = new IntentFilter(Intent.ACTION_HEADSET_PLUG);
-        IntentFilter volumeFilter = new IntentFilter("android.media.VOLUME_CHANGED_ACTION");
         IntentFilter batteryFilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
         IntentFilter downloadFilter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
 
         ContextCompat.registerReceiver(this, screenOffReceiver, screenOffFilter, ContextCompat.RECEIVER_EXPORTED);
         ContextCompat.registerReceiver(this, headsetPlugReceiver, headsetFilter, ContextCompat.RECEIVER_EXPORTED);
-        ContextCompat.registerReceiver(this, volumeChangeReceiver, volumeFilter, ContextCompat.RECEIVER_EXPORTED);
         ContextCompat.registerReceiver(this, batteryReceiver, batteryFilter, ContextCompat.RECEIVER_EXPORTED);
         ContextCompat.registerReceiver(this, downloadCompleteReceiver, downloadFilter, ContextCompat.RECEIVER_EXPORTED);
     }
@@ -1009,7 +988,6 @@ public class MainActivity extends AppCompatActivity {
         try {
             if (screenOffReceiver != null) unregisterReceiver(screenOffReceiver);
             if (headsetPlugReceiver != null) unregisterReceiver(headsetPlugReceiver);
-            if (volumeChangeReceiver != null) unregisterReceiver(volumeChangeReceiver);
             if (batteryReceiver != null) unregisterReceiver(batteryReceiver);
             if (downloadCompleteReceiver != null) unregisterReceiver(downloadCompleteReceiver);
 
