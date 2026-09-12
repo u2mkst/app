@@ -178,7 +178,7 @@ public class MainActivity extends AppCompatActivity {
 
             // ⛔ 상단 상태 바 종료 버튼 — 관리자 비밀번호 확인 후 앱 종료
             if (ivQuit != null) {
-                ivQuit.setOnClickListener(v -> showQuitPasswordDialog());
+                ivQuit.setOnClickListener(v -> showAdminPasswordDialog());
             }
 
             // 🔄 당겨서 새로고침 리스너
@@ -652,30 +652,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ⛔ 상단 상태 바 종료 버튼 — 관리자 비밀번호 확인 후 앱 완전 종료
-    private void showQuitPasswordDialog() {
-        try {
-            final EditText input = new EditText(this);
-            input.setHint("관리자 비밀번호");
-            input.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
-
-            new AlertDialog.Builder(this)
-                    .setTitle("⛔ 앱 종료")
-                    .setMessage("관리자 비밀번호를 입력하면 앱이 종료됩니다.")
-                    .setView(input)
-                    .setPositiveButton("종료", (dialog, which) -> {
-                        if (ADMIN_PASSWORD.equals(input.getText().toString())) {
-                            quitApp();
-                        } else {
-                            Toast.makeText(this, "비밀번호가 올바르지 않습니다.", Toast.LENGTH_SHORT).show();
-                        }
-                    })
-                    .setNegativeButton("취소", null)
-                    .show();
-        } catch (Exception e) {
-            Log.e(TAG, "종료 다이얼로그 표시 실패: " + e.getMessage());
-        }
-    }
-
     // ⛔ 앱 고정(Lock Task) 상태를 해제하고 앱을 완전히 종료
     private void quitApp() {
         try {
