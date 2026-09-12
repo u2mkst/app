@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-release:
@@ -48,3 +48,39 @@ jobs:
         with:
           name: kst-release-apk
           path: app/build/outputs/apk/release/app-release.apk
+
+      - name: Read version name
+        id: version
+        run: |
+          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version_name }}
+          name: v${{ steps.version.outputs.version_name }}
+          files: app/build/outputs/apk/release/app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout u2mkst/home
+        uses: actions/checkout@v4
+        with:
+          repository: u2mkst/home
+          token: ${{ secrets.HOME_REPO_PAT }}
+          path: home-repo
+
+      - name: Publish apk to u2mkst/home
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk home-repo/kst.apk
+          cd home-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add kst.apk
+          if git diff --cached --quiet; then
+            echo "kst.apk unchanged, skipping commit"
+          else
+            git commit -m "Update kst.apk to v${{ steps.version.outputs.version_name }}"
+            git push
+          fi
