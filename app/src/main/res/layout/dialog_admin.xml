@@ -11,7 +11,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="K&amp;P ADMIN CENTER"
+        android:text="K&amp;P ADMIN"
         android:textColor="#0F172A"
         android:textSize="20sp"
         android:textStyle="bold"
@@ -43,40 +43,134 @@
         android:textSize="14sp"
         android:gravity="center"
         android:letterSpacing="0.1"
-        android:layout_marginBottom="24dp"/>
-
-    <Button
-        android:id="@+id/btn_clear_cache"
-        android:layout_width="match_parent"
-        android:layout_height="52dp"
-        android:text="🔄 웹 캐시 초기화 및 새로고침"
-        android:textColor="#FFFFFF"
-        android:textSize="14sp"
-        android:textStyle="bold"
-        android:backgroundTint="#2563EB"
-        android:layout_marginBottom="10dp"/>
-
-    <Button
-        android:id="@+id/btn_reset"
-        android:layout_width="match_parent"
-        android:layout_height="52dp"
-        android:text="🔧 키오스크 앱 재시작"
-        android:textColor="#2563EB"
-        android:textSize="14sp"
-        android:textStyle="bold"
-        android:backgroundTint="#EFF6FF"
-        android:layout_marginBottom="10dp"/>
+        android:layout_marginBottom="16dp"/>
 
     <Button
         android:id="@+id/btn_exit"
         android:layout_width="match_parent"
         android:layout_height="52dp"
-        android:text="⚙️ 태블릿 단말기 설정"
-        android:textColor="#475569"
+        android:text="앱 나가기"
+        android:textColor="#FFFFFF"
         android:textSize="14sp"
         android:textStyle="bold"
-        android:backgroundTint="#F8FAFC"
-        android:layout_marginBottom="24dp"/>
+        android:backgroundTint="#004BBF"
+        android:layout_marginBottom="20dp"/>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#EEF1F4"
+        android:layout_marginBottom="14dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="현재 버전"
+            android:textColor="#64748B"
+            android:textSize="12sp"/>
+        <TextView
+            android:id="@+id/tv_current_version"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="v-"
+            android:textColor="#0F172A"
+            android:textStyle="bold"
+            android:textSize="11.5sp"
+            android:fontFamily="monospace"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="업데이트"
+            android:textColor="#64748B"
+            android:textSize="12sp"/>
+        <TextView
+            android:id="@+id/tv_update_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="확인 중"
+            android:textColor="#94A3B8"
+            android:textSize="10.5sp"
+            android:background="#EEF1F4"
+            android:paddingLeft="9dp"
+            android:paddingRight="9dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"/>
+        <Button
+            android:id="@+id/btn_update"
+            android:layout_width="wrap_content"
+            android:layout_height="30dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:visibility="gone"
+            android:text="업데이트"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:paddingLeft="14dp"
+            android:paddingRight="14dp"
+            android:backgroundTint="#004BBF"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="6dp">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="배터리"
+            android:textColor="#64748B"
+            android:textSize="12sp"/>
+        <TextView
+            android:id="@+id/tv_battery_info"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="-"
+            android:textColor="#0F172A"
+            android:textStyle="bold"
+            android:textSize="11.5sp"
+            android:fontFamily="monospace"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="24dp">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="이어폰"
+            android:textColor="#64748B"
+            android:textSize="12sp"/>
+        <TextView
+            android:id="@+id/tv_earphone_info"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="-"
+            android:textColor="#0F172A"
+            android:textStyle="bold"
+            android:textSize="11.5sp"
+            android:fontFamily="monospace"/>
+    </LinearLayout>
 
     <TextView
         android:id="@+id/btn_cancel"

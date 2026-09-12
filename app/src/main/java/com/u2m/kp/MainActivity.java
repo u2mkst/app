@@ -735,49 +735,30 @@ public class MainActivity extends AppCompatActivity {
             if (dialog.getWindow() != null) dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
 
             EditText etPassword = dialogView.findViewById(R.id.et_password);
-            Button btnReset = dialogView.findViewById(R.id.btn_reset);
             Button btnExit = dialogView.findViewById(R.id.btn_exit);
             TextView btnCancel = dialogView.findViewById(R.id.btn_cancel);
-            Button btnClearCache = dialogView.findViewById(R.id.btn_clear_cache);
+            TextView tvCurrentVersion = dialogView.findViewById(R.id.tv_current_version);
+            TextView tvUpdateStatus = dialogView.findViewById(R.id.tv_update_status);
+            Button btnUpdate = dialogView.findViewById(R.id.btn_update);
+            TextView tvBatteryInfo = dialogView.findViewById(R.id.tv_battery_info);
+            TextView tvEarphoneInfo = dialogView.findViewById(R.id.tv_earphone_info);
 
-            btnReset.setOnClickListener(v -> {
-                if (etPassword.getText().toString().equals(ADMIN_PASSWORD)) {
-                    dialog.dismiss();
-                    finishAffinity();
-                    startActivity(new Intent(this, MainActivity.class));
-                }
-            });
+            tvCurrentVersion.setText("v" + getAppVersionName());
+            tvBatteryInfo.setText(getBatteryLevel() + "%");
+            tvEarphoneInfo.setText(isEarphonesPlugged() ? "연결됨" : "미연결");
 
-            if (btnClearCache != null) {
-                btnClearCache.setOnClickListener(v -> {
-                    if (etPassword.getText().toString().equals(ADMIN_PASSWORD)) {
-                        executeSessionClear();
-                        if (webView != null) webView.reload();
-                        Toast.makeText(MainActivity.this, "🔄 웹 저장소 및 캐시 청소가 완료되었습니다.", Toast.LENGTH_SHORT).show();
-                        dialog.dismiss();
-                    } else {
-                        Toast.makeText(MainActivity.this, "비밀번호가 올바르지 않습니다.", Toast.LENGTH_SHORT).show();
-                    }
-                });
-            }
-
-            btnExit.setText("태블릿 설정");
             btnExit.setOnClickListener(v -> {
                 if (etPassword.getText().toString().equals(ADMIN_PASSWORD)) {
                     dialog.dismiss();
-                    try {
-                        Intent intent = new Intent(Settings.ACTION_SETTINGS);
-                        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        startActivity(intent);
-                    } catch (Exception e) {
-                        Toast.makeText(this, "설정 창을 열 수 없습니다.", Toast.LENGTH_SHORT).show();
-                    }
+                    quitApp();
+                } else {
+                    Toast.makeText(this, "비밀번호가 올바르지 않습니다.", Toast.LENGTH_SHORT).show();
                 }
             });
 
             btnCancel.setOnClickListener(v -> dialog.dismiss());
 
-            showAdminDiagnosticSummary();
+            checkForAppUpdate(tvUpdateStatus, btnUpdate);
 
             dialog.show();
         } catch (Exception e) {
@@ -785,11 +766,52 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void showAdminDiagnosticSummary() {
-        String info = "📱 앱 버전: v" + getAppVersionName() + "\n" +
-                "🔋 배터리 잔량: " + getBatteryLevel() + "%\n" +
-                "🎧 이어폰 상태: " + (isEarphonesPlugged() ? "연결됨" : "미연결");
-        Toast.makeText(this, info, Toast.LENGTH_LONG).show();
+    // 🆕 u2mkst/app의 최신 GitHub Release와 현재 앱 버전을 비교해 업데이트 여부를 표시.
+    // 다르면 "업데이트" 버튼을 노출하고, 누르면 바로 최신 apk 다운로드를 시작한다.
+    private void checkForAppUpdate(TextView tvUpdateStatus, Button btnUpdate) {
+        new Thread(() -> {
+            String latestVersion = null;
+            try {
+                java.net.URL url = new java.net.URL("https://api.github.com/repos/u2mkst/app/releases/latest");
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
+                conn.setRequestProperty("Accept", "application/vnd.github+json");
+
+                StringBuilder sb = new StringBuilder();
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(conn.getInputStream()))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) sb.append(line);
+                }
+                String tagName = new org.json.JSONObject(sb.toString()).optString("tag_name", "");
+                if (tagName.startsWith("v")) tagName = tagName.substring(1);
+                if (!tagName.isEmpty()) latestVersion = tagName;
+            } catch (Exception e) {
+                Log.e(TAG, "업데이트 확인 실패: " + e.getMessage());
+            }
+
+            final String finalLatest = latestVersion;
+            runOnUiThread(() -> {
+                if (finalLatest == null) {
+                    tvUpdateStatus.setText("확인 실패");
+                    return;
+                }
+                if (finalLatest.equals(getAppVersionName())) {
+                    tvUpdateStatus.setText("최신 버전");
+                    btnUpdate.setVisibility(View.GONE);
+                } else {
+                    tvUpdateStatus.setVisibility(View.GONE);
+                    btnUpdate.setText("v" + finalLatest + " 업데이트");
+                    btnUpdate.setVisibility(View.VISIBLE);
+                    btnUpdate.setOnClickListener(v -> {
+                        btnUpdate.setEnabled(false);
+                        btnUpdate.setText("다운로드 중...");
+                        downloadApkFile("https://u2mkst.github.io/home/kst.apk?t=" + System.currentTimeMillis());
+                    });
+                }
+            });
+        }).start();
     }
 
     // ---------------------------------------------------------------------------------------------
