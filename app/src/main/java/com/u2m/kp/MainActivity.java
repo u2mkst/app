@@ -48,6 +48,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -71,10 +72,12 @@ public class MainActivity extends AppCompatActivity {
     private SwipeRefreshLayout swipeRefreshLayout;
     private Button homeFloatingButton;
 
-    // 📶 얇은 상단 상태 바 (시각 / 배터리 / 네트워크)
+    // 📶 얇은 상단 상태 바 (시각 / 배터리 / 네트워크 / 종료)
     private TextView tvClock;
     private TextView tvBattery;
-    private TextView tvNetworkStatus;
+    private ImageView ivBattery;
+    private ImageView ivNetworkStatus;
+    private ImageView ivQuit;
     private final Handler clockHandler = new Handler(Looper.getMainLooper());
     private Runnable clockRunnable;
 
@@ -139,7 +142,9 @@ public class MainActivity extends AppCompatActivity {
             homeFloatingButton = findViewById(R.id.btnHome);
             tvClock = findViewById(R.id.tvClock);
             tvBattery = findViewById(R.id.tvBattery);
-            tvNetworkStatus = findViewById(R.id.tvNetworkStatus);
+            ivBattery = findViewById(R.id.ivBattery);
+            ivNetworkStatus = findViewById(R.id.ivNetworkStatus);
+            ivQuit = findViewById(R.id.ivQuit);
 
             if (webView == null) {
                 throw new NullPointerException("❌ [XML 매칭 실패] activity_main.xml에 'webView' ID가 존재하지 않습니다.");
@@ -158,8 +163,8 @@ public class MainActivity extends AppCompatActivity {
             }
 
             // 📶 상단 상태 바 네트워크 아이콘 탭 시 네트워크 설정 화면으로 이동
-            if (tvNetworkStatus != null) {
-                tvNetworkStatus.setOnClickListener(v -> {
+            if (ivNetworkStatus != null) {
+                ivNetworkStatus.setOnClickListener(v -> {
                     try {
                         startActivity(new Intent(Settings.ACTION_WIRELESS_SETTINGS));
                     } catch (Exception e) {
@@ -170,6 +175,11 @@ public class MainActivity extends AppCompatActivity {
             }
 
             updateBatteryStatusText();
+
+            // ⛔ 상단 상태 바 종료 버튼 — 관리자 비밀번호 확인 후 앱 종료
+            if (ivQuit != null) {
+                ivQuit.setOnClickListener(v -> showQuitPasswordDialog());
+            }
 
             // 🔄 당겨서 새로고침 리스너
             // WebView는 NestedScrollingChild를 구현하지 않아 SwipeRefreshLayout이 제스처를
@@ -334,6 +344,7 @@ public class MainActivity extends AppCompatActivity {
                         swipeRefreshLayout.setRefreshing(false);
                     }
 
+                    injectScrollBridge(view);
                     checkAndToggleHomeButton(url);
                     if (url == null) return;
 
@@ -508,9 +519,7 @@ public class MainActivity extends AppCompatActivity {
                     int status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
                     boolean isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL;
 
-                    if (tvBattery != null) {
-                        tvBattery.setText((isCharging ? "⚡ " : "🔋 ") + batteryPct + "%");
-                    }
+                    applyBatteryUi(batteryPct, isCharging);
 
                     if (batteryPct <= 15 && !isCharging && !isLowBatteryWarned) {
                         isLowBatteryWarned = true;
@@ -579,30 +588,43 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // 📶 상단 상태 바의 네트워크 아이콘을 현재 연결 상태로 갱신
+    // 🔄 페이지 안의 내부 스크롤 div(랭킹/시간표 패널 등)까지 감안한 당겨서 새로고침 제어.
+    // WebView 자체(document)는 스크롤이 안 되고 내부 div가 overflow-y로 스크롤되는
+    // 화면에서는 canScrollVertically(-1)/getScrollY()가 항상 0을 가리켜서, 내부 스크롤이
+    // 맨 위가 아닌데도 새로고침이 발동한다. capture 단계로 모든 하위 요소의 'scroll'
+    // 이벤트를 잡아 실제로 스크롤된 요소의 scrollTop을 네이티브로 그대로 전달한다.
+    private void injectScrollBridge(WebView view) {
+        if (view == null) return;
+        String js = "(function(){" +
+                "if(window.__kpScrollBridgeInstalled)return;" +
+                "window.__kpScrollBridgeInstalled=true;" +
+                "document.addEventListener('scroll',function(e){" +
+                "var el=(e.target===document)?document.scrollingElement:e.target;" +
+                "if(el&&window.AndroidApp&&window.AndroidApp.reportScrollTop){" +
+                "window.AndroidApp.reportScrollTop(el.scrollTop<=0);" +
+                "}" +
+                "},true);" +
+                "})();";
+        view.evaluateJavascript(js, null);
+    }
+
+    // 📶 상단 상태 바의 네트워크 아이콘을 현재 연결 상태로 갱신 (기기마다 다르게 보이는
+    // 이모지 대신 통일된 벡터 아이콘 두 종류만 사용: 연결됨 / 끊김)
     private void updateNetworkStatusIcon() {
-        if (tvNetworkStatus == null) return;
+        if (ivNetworkStatus == null) return;
+        boolean hasInternet = false;
         try {
             ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
             NetworkCapabilities capabilities = cm != null ? cm.getNetworkCapabilities(cm.getActiveNetwork()) : null;
-
-            if (capabilities == null || !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
-                tvNetworkStatus.setText("📴");
-            } else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                tvNetworkStatus.setText("📶");
-            } else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
-                tvNetworkStatus.setText("📱");
-            } else {
-                tvNetworkStatus.setText("🌐");
-            }
+            hasInternet = capabilities != null && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
         } catch (Exception e) {
-            tvNetworkStatus.setText("📴");
+            Log.e(TAG, "네트워크 상태 확인 실패: " + e.getMessage());
         }
+        ivNetworkStatus.setImageResource(hasInternet ? R.drawable.ic_network_connected : R.drawable.ic_network_disconnected);
     }
 
     // 🔋 상단 상태 바의 배터리 표시를 현재 잔량으로 초기화
     private void updateBatteryStatusText() {
-        if (tvBattery == null) return;
         try {
             IntentFilter filter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
             Intent batteryStatus = registerReceiver(null, filter);
@@ -612,11 +634,60 @@ public class MainActivity extends AppCompatActivity {
                 int status = batteryStatus.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
                 boolean isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL;
                 int batteryPct = (int) ((level / (float) scale) * 100);
-                tvBattery.setText((isCharging ? "⚡ " : "🔋 ") + batteryPct + "%");
+                applyBatteryUi(batteryPct, isCharging);
             }
         } catch (Exception e) {
             Log.e(TAG, "배터리 상태 초기화 실패: " + e.getMessage());
         }
+    }
+
+    // 🔋 배터리 아이콘/퍼센트 텍스트를 함께 갱신 (충전 중이면 번개 아이콘으로 전환)
+    private void applyBatteryUi(int batteryPct, boolean isCharging) {
+        if (tvBattery != null) {
+            tvBattery.setText(batteryPct + "%");
+        }
+        if (ivBattery != null) {
+            ivBattery.setImageResource(isCharging ? R.drawable.ic_battery_charging : R.drawable.ic_battery);
+        }
+    }
+
+    // ⛔ 상단 상태 바 종료 버튼 — 관리자 비밀번호 확인 후 앱 완전 종료
+    private void showQuitPasswordDialog() {
+        try {
+            final EditText input = new EditText(this);
+            input.setHint("관리자 비밀번호");
+            input.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+
+            new AlertDialog.Builder(this)
+                    .setTitle("⛔ 앱 종료")
+                    .setMessage("관리자 비밀번호를 입력하면 앱이 종료됩니다.")
+                    .setView(input)
+                    .setPositiveButton("종료", (dialog, which) -> {
+                        if (ADMIN_PASSWORD.equals(input.getText().toString())) {
+                            quitApp();
+                        } else {
+                            Toast.makeText(this, "비밀번호가 올바르지 않습니다.", Toast.LENGTH_SHORT).show();
+                        }
+                    })
+                    .setNegativeButton("취소", null)
+                    .show();
+        } catch (Exception e) {
+            Log.e(TAG, "종료 다이얼로그 표시 실패: " + e.getMessage());
+        }
+    }
+
+    // ⛔ 앱 고정(Lock Task) 상태를 해제하고 앱을 완전히 종료
+    private void quitApp() {
+        try {
+            ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+            if (am != null && am.getLockTaskModeState() != ActivityManager.LOCK_TASK_MODE_NONE) {
+                stopLockTask();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "앱 고정 해제 실패: " + e.getMessage());
+        }
+        finishAffinity();
+        System.exit(0);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -1042,6 +1113,13 @@ public class MainActivity extends AppCompatActivity {
         public void loginToMathflat(String mathflatId, String mathflatPw) { savedStudentPhone = mathflatId; savedMathflatPw = mathflatPw; }
         @JavascriptInterface
         public void logoutAll() { executeSessionClear(); }
+
+        @JavascriptInterface
+        public void reportScrollTop(boolean atTop) {
+            runOnUiThread(() -> {
+                if (swipeRefreshLayout != null) swipeRefreshLayout.setEnabled(atTop);
+            });
+        }
 
         @JavascriptInterface
         public int getBatteryLevel() { return MainActivity.this.getBatteryLevel(); }

@@ -40,28 +40,53 @@
                 android:layout_height="1dp"
                 android:layout_weight="1" />
 
-            <TextView
-                android:id="@+id/tvNetworkStatus"
+            <ImageView
+                android:id="@+id/ivNetworkStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
                 android:background="?attr/selectableItemBackground"
                 android:clickable="true"
                 android:focusable="true"
-                android:gravity="center_vertical"
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
-                android:text="📶"
-                android:textColor="#FFFFFF"
-                android:textSize="11sp" />
+                android:src="@drawable/ic_network_connected"
+                android:scaleType="fitCenter"
+                android:contentDescription="네트워크 상태 (탭하여 설정 열기)"
+                app:tint="#FFFFFF" />
+
+            <ImageView
+                android:id="@+id/ivBattery"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:layout_marginStart="6dp"
+                android:src="@drawable/ic_battery"
+                android:scaleType="fitCenter"
+                android:contentDescription="배터리 상태"
+                app:tint="#FFFFFF" />
 
             <TextView
                 android:id="@+id/tvBattery"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="3dp"
                 android:includeFontPadding="false"
-                android:text="🔋 100%"
+                android:text="100%"
                 android:textColor="#FFFFFF"
                 android:textSize="11sp" />
+
+            <ImageView
+                android:id="@+id/ivQuit"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_marginStart="10dp"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:src="@drawable/ic_quit"
+                android:scaleType="fitCenter"
+                android:contentDescription="앱 종료" />
 
         </LinearLayout>
 
