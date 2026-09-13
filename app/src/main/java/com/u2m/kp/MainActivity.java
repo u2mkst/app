@@ -22,7 +22,6 @@ import android.net.http.SslError;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.CountDownTimer;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
@@ -66,7 +65,20 @@ import java.io.File;
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "KioskWebViewJS";
-    private static final String ADMIN_PASSWORD = "kstadmin";
+    // 평문 대신 SHA-256 해시로 저장 — 소스가 공개 저장소에 있어도 비밀번호 원문이 그대로 보이지 않게 한다.
+    private static final String ADMIN_PASSWORD_HASH = "7f6a1b1ad20c02938a31632cc095da8cc463a7f31a736d2c07182d7e0e031cf9";
+
+    private static boolean isAdminPasswordCorrect(String input) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = digest.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (byte b : hashBytes) hex.append(String.format("%02x", b));
+            return hex.toString().equals(ADMIN_PASSWORD_HASH);
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     private WebView webView;
     private SwipeRefreshLayout swipeRefreshLayout;
@@ -87,12 +99,6 @@ public class MainActivity extends AppCompatActivity {
     private String savedMathflatPw = "";
     private String savedStudentPhone = "";
 
-    // ⏱️ 유휴 시간 타이머 (30분 미활동 시 경고 및 자동 로그아웃)
-    private Handler idleHandler = new Handler(Looper.getMainLooper());
-    private Runnable idleRunnable;
-    private AlertDialog warningDialog = null;
-    private CountDownTimer countDownTimer = null;
-
     // 시스템 브로드캐스트 리시버 및 네트워크 모니터링
     private BroadcastReceiver screenOffReceiver = null;
     private BroadcastReceiver headsetPlugReceiver = null;
@@ -104,9 +110,6 @@ public class MainActivity extends AppCompatActivity {
     private boolean isLowBatteryWarned = false;
     private boolean isHomeButtonHidden = false; // 길게 눌러 숨김 — 새로고침 전까지 유지
     private boolean isShowingNetworkErrorPage = false;
-
-    private static final long IDLE_TIMEOUT = 30 * 60 * 1000; // 30분
-    private static final long WARNING_TIMEOUT = 30 * 1000;     // 30초 카운트다운
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -457,7 +460,6 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
-            initIdleTimer();
             registerSystemReceivers();
             registerNetworkCallback();
 
@@ -523,8 +525,6 @@ public class MainActivity extends AppCompatActivity {
             public void onReceive(Context context, Intent intent) {
                 if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
                     Log.d(TAG, "🎯 [보안] 태블릿 화면 꺼짐 감지 -> 데이터 삭제 및 로그아웃 대기 플래그 세팅");
-                    stopCountDown();
-                    if (warningDialog != null && warningDialog.isShowing()) warningDialog.dismiss();
                     executeSessionClear();
                     isPendingScreenOffLogout = true;
                 }
@@ -766,7 +766,7 @@ public class MainActivity extends AppCompatActivity {
             tvEarphoneInfo.setText(isEarphonesPlugged() ? "연결됨" : "미연결");
 
             btnExit.setOnClickListener(v -> {
-                if (etPassword.getText().toString().equals(ADMIN_PASSWORD)) {
+                if (isAdminPasswordCorrect(etPassword.getText().toString())) {
                     dialog.dismiss();
                     quitApp();
                 } else {
@@ -922,76 +922,6 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception fatal) {
             fatal.printStackTrace();
         }
-    }
-
-    @Override
-    public void onUserInteraction() {
-        super.onUserInteraction();
-        resetIdleTimer();
-    }
-
-    private void initIdleTimer() {
-        idleRunnable = () -> showIdleWarningDialog();
-        startIdleTimer();
-    }
-
-    private void startIdleTimer() {
-        if (idleHandler != null && idleRunnable != null) {
-            idleHandler.postDelayed(idleRunnable, IDLE_TIMEOUT);
-        }
-    }
-
-    private void resetIdleTimer() {
-        if (idleHandler != null && idleRunnable != null) {
-            idleHandler.removeCallbacks(idleRunnable);
-            startIdleTimer();
-        }
-    }
-
-    private void showIdleWarningDialog() {
-        if (isFinishing() || isDestroyed()) return;
-        try {
-            AlertDialog.Builder builder = new AlertDialog.Builder(this);
-            builder.setTitle("사용 시간 초과 안내");
-            builder.setCancelable(false);
-            builder.setPositiveButton("계속 학습하기", (dialog, which) -> {
-                stopCountDown();
-                resetIdleTimer();
-            });
-
-            warningDialog = builder.create();
-            warningDialog.show();
-
-            countDownTimer = new CountDownTimer(WARNING_TIMEOUT, 1000) {
-                @Override
-                public void onTick(long millisUntilFinished) {
-                    if (warningDialog != null && warningDialog.isShowing()) {
-                        warningDialog.setMessage("30분 동안 움직임이 없어 안전을 위해\n" + (millisUntilFinished / 1000) + "초 후 자동으로 로그아웃됩니다.");
-                    }
-                }
-                @Override
-                public void onFinish() {
-                    if (warningDialog != null && warningDialog.isShowing()) warningDialog.dismiss();
-                    executeAutoLogout();
-                }
-            }.start();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void stopCountDown() {
-        if (countDownTimer != null) {
-            countDownTimer.cancel();
-            countDownTimer = null;
-        }
-    }
-
-    private void executeAutoLogout() {
-        executeSessionClear();
-        runOnUiThread(() -> {
-            if (webView != null) webView.loadUrl("https://u2mkst.github.io/home");
-        });
     }
 
     private void executeSessionClear() {
@@ -1196,8 +1126,6 @@ public class MainActivity extends AppCompatActivity {
             e.printStackTrace();
         }
 
-        if (idleHandler != null && idleRunnable != null) idleHandler.removeCallbacks(idleRunnable);
         if (clockRunnable != null) clockHandler.removeCallbacks(clockRunnable);
-        stopCountDown();
     }
 }
