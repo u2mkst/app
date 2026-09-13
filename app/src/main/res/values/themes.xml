@@ -3,7 +3,29 @@
     <style name="Base.Theme.KP수학입시학원" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Customize your light theme here. -->
         <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+        <item name="android:fontFamily">@font/paperlogy_semibold</item>
+        <item name="fontFamily">@font/paperlogy_semibold</item>
+        <!-- Material3 위젯(버튼/다이얼로그)은 자체 TextAppearance에서 폰트를 다시 지정하므로,
+             테마 fontFamily만으로는 안 먹는다. 실제로 쓰이는 타입스케일도 같이 덮어쓴다. -->
+        <item name="textAppearanceHeadlineSmall">@style/TextAppearance.KP.HeadlineSmall</item>
+        <item name="textAppearanceBodyMedium">@style/TextAppearance.KP.BodyMedium</item>
+        <item name="textAppearanceLabelLarge">@style/TextAppearance.KP.LabelLarge</item>
     </style>
 
     <style name="Theme.KP수학입시학원" parent="Base.Theme.KP수학입시학원" />
+
+    <style name="TextAppearance.KP.HeadlineSmall" parent="TextAppearance.Material3.HeadlineSmall">
+        <item name="android:fontFamily">@font/paperlogy_semibold</item>
+        <item name="fontFamily">@font/paperlogy_semibold</item>
+    </style>
+
+    <style name="TextAppearance.KP.BodyMedium" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:fontFamily">@font/paperlogy_semibold</item>
+        <item name="fontFamily">@font/paperlogy_semibold</item>
+    </style>
+
+    <style name="TextAppearance.KP.LabelLarge" parent="TextAppearance.Material3.LabelLarge">
+        <item name="android:fontFamily">@font/paperlogy_semibold</item>
+        <item name="fontFamily">@font/paperlogy_semibold</item>
+    </style>
 </resources>

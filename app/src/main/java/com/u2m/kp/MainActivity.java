@@ -102,6 +102,8 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean isPendingScreenOffLogout = false;
     private boolean isLowBatteryWarned = false;
+    private boolean isHomeButtonHidden = false; // 길게 눌러 숨김 — 새로고침 전까지 유지
+    private boolean isShowingNetworkErrorPage = false;
 
     private static final long IDLE_TIMEOUT = 30 * 60 * 1000; // 30분
     private static final long WARNING_TIMEOUT = 30 * 1000;     // 30초 카운트다운
@@ -191,6 +193,7 @@ public class MainActivity extends AppCompatActivity {
             if (swipeRefreshLayout != null) {
                 swipeRefreshLayout.setOnRefreshListener(() -> {
                     if (webView != null) {
+                        isHomeButtonHidden = false;
                         webView.reload();
                     }
                 });
@@ -223,11 +226,26 @@ public class MainActivity extends AppCompatActivity {
 
                     homeFloatingButton.setBackground(layerDrawable);
                     homeFloatingButton.setCompoundDrawablesWithIntrinsicBounds(null, null, null, null);
+
+                    // 🌟 기본 검은 그림자 대신 버튼 색과 어울리는 파란빛 그림자
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        homeFloatingButton.setOutlineAmbientShadowColor(Color.parseColor("#004BBF"));
+                        homeFloatingButton.setOutlineSpotShadowColor(Color.parseColor("#004BBF"));
+                    }
                 }
 
                 homeFloatingButton.setVisibility(View.GONE);
                 homeFloatingButton.setOnClickListener(v -> {
                     webView.loadUrl("https://u2mkst.github.io/home");
+                });
+
+                // 🙈 길게 누르면 숨김 — 새로고침(당겨서 새로고침 / 네트워크 재연결 자동 새로고침)
+                // 전까지는 계속 숨겨져 있는다.
+                homeFloatingButton.setOnLongClickListener(v -> {
+                    isHomeButtonHidden = true;
+                    homeFloatingButton.setVisibility(View.GONE);
+                    Toast.makeText(this, "홈 버튼을 숨겼습니다. 새로고침하면 다시 나타납니다.", Toast.LENGTH_SHORT).show();
+                    return true;
                 });
             }
 
@@ -312,21 +330,38 @@ public class MainActivity extends AppCompatActivity {
                     if (request.isForMainFrame()) {
                         Log.w(TAG, "⚠️ 네트워크 끊김 감지: " + error.getDescription());
 
-                        String errorImageHtml = "<!DOCTYPE html>" +
+                        String failedUrl = request.getUrl() != null ? request.getUrl().toString() : "https://u2mkst.github.io/home";
+                        String retryUrl = failedUrl.replace("\\", "\\\\").replace("'", "\\'");
+
+                        String errorHtml = "<!DOCTYPE html>" +
                                 "<html><head><meta charset='UTF-8'>" +
                                 "<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no'>" +
                                 "<style>" +
-                                "  * { margin: 0; padding: 0; box-sizing: border-box; }" +
-                                "  html, body { width: 100%; height: 100%; overflow: hidden; background-color: #f7f3f6; }" +
-                                "  .img-container { width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; }" +
-                                "  img { width: 100%; height: 100%; object-fit: cover; cursor: pointer; }" +
+                                "* { margin: 0; padding: 0; box-sizing: border-box; }" +
+                                "html, body { width: 100%; height: 100%; background: #F2F4F6; " +
+                                "  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Malgun Gothic', sans-serif; }" +
+                                ".wrap { width: 100vw; height: 100vh; display: flex; flex-direction: column; " +
+                                "  align-items: center; justify-content: center; padding: 24px; text-align: center; }" +
+                                ".icon { width: 56px; height: 56px; margin-bottom: 22px; }" +
+                                "h1 { font-size: 20px; font-weight: 800; color: #191F28; margin-bottom: 8px; }" +
+                                "p { font-size: 13.5px; color: #8B95A1; line-height: 1.6; margin-bottom: 30px; }" +
+                                "button { font-family: inherit; font-size: 15px; font-weight: 700; color: #FFFFFF; " +
+                                "  background: #004BBF; border: none; border-radius: 14px; padding: 14px 34px; }" +
+                                "button:active { opacity: 0.85; }" +
                                 "</style></head><body>" +
-                                "  <div class='img-container'>" +
-                                "    <img src='file:///android_res/drawable/wifi_error.png' onclick='location.href=\"https://u2mkst.github.io/home\"' alt='Network Error'>" +
-                                "  </div>" +
+                                "<div class='wrap'>" +
+                                "  <svg class='icon' viewBox='0 0 24 24'>" +
+                                "    <path fill='#8B95A1' fill-opacity='0.4' d='M1,14L5,14L5,20L1,20Z M7,10L11,10L11,20L7,20Z M13,6L17,6L17,20L13,20Z M19,2L23,2L23,20L19,20Z'/>" +
+                                "    <path stroke='#191F28' stroke-width='2.2' stroke-linecap='round' d='M2,21L22,3'/>" +
+                                "  </svg>" +
+                                "  <h1>네트워크 연결 실패</h1>" +
+                                "  <p>네트워크 상태를 확인한 뒤<br>다시 시도해 주세요</p>" +
+                                "  <button onclick=\"location.href='" + retryUrl + "'\">다시 시도</button>" +
+                                "</div>" +
                                 "</body></html>";
 
-                        view.loadDataWithBaseURL("https://u2mkst.github.io/", errorImageHtml, "text/html", "UTF-8", null);
+                        isShowingNetworkErrorPage = true;
+                        view.loadDataWithBaseURL("https://u2mkst.github.io/", errorHtml, "text/html", "UTF-8", null);
                     }
                 }
 
@@ -342,6 +377,12 @@ public class MainActivity extends AppCompatActivity {
 
                     if (swipeRefreshLayout != null && swipeRefreshLayout.isRefreshing()) {
                         swipeRefreshLayout.setRefreshing(false);
+                    }
+
+                    // 오프라인 에러 페이지는 baseURL("https://u2mkst.github.io/")로만 보고되므로,
+                    // 실제 콘텐츠 경로(/home, /login 등)로 넘어간 경우에만 에러 상태를 해제한다.
+                    if (!"https://u2mkst.github.io/".equals(url)) {
+                        isShowingNetworkErrorPage = false;
                     }
 
                     injectScrollBridge(view);
@@ -569,8 +610,9 @@ public class MainActivity extends AppCompatActivity {
                     public void onAvailable(Network network) {
                         runOnUiThread(() -> {
                             updateNetworkStatusIcon();
-                            if (webView != null && webView.getUrl() != null && webView.getUrl().contains("wifi_error.png")) {
+                            if (webView != null && isShowingNetworkErrorPage) {
                                 Toast.makeText(MainActivity.this, "📶 인터넷이 재연결되었습니다. 페이지를 새로고칩니다.", Toast.LENGTH_SHORT).show();
+                                isHomeButtonHidden = false;
                                 webView.reload();
                             }
                         });
@@ -821,17 +863,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void requestHomeAppSettingPopup() {
-        try {
-            Intent intent = new Intent(Intent.ACTION_MAIN);
-            intent.addCategory(Intent.CATEGORY_HOME);
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(intent);
-        } catch (Exception e) {
-            Log.e(TAG, "홈 설정 팝업 실행 실패: " + e.getMessage());
-        }
-    }
-
     private void downloadApkFile(String url) {
         try {
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
@@ -1045,6 +1076,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void checkAndToggleHomeButton(String url) {
         if (url == null || homeFloatingButton == null) return;
+        if (isHomeButtonHidden) return; // 새로고침 전까지는 사용자가 숨긴 상태를 유지
 
         Uri uri = Uri.parse(url);
         String path = uri.getPath();
@@ -1108,8 +1140,6 @@ public class MainActivity extends AppCompatActivity {
             savedU2mId = u2mId; savedPhone = phone; savedMathflatPw = mathflatPw; savedStudentPhone = studentPhone;
         }
         @JavascriptInterface
-        public void loginToMathflat(String mathflatId, String mathflatPw) { savedStudentPhone = mathflatId; savedMathflatPw = mathflatPw; }
-        @JavascriptInterface
         public void logoutAll() { executeSessionClear(); }
 
         @JavascriptInterface
@@ -1123,13 +1153,7 @@ public class MainActivity extends AppCompatActivity {
         public int getBatteryLevel() { return MainActivity.this.getBatteryLevel(); }
 
         @JavascriptInterface
-        public String getAppVersion() { return getAppVersionName(); }
-
-        @JavascriptInterface
         public void rebootDevice() { finishAffinity(); System.exit(0); }
-
-        @JavascriptInterface
-        public void requestHomeAppSetting() { runOnUiThread(() -> requestHomeAppSettingPopup()); }
 
         @JavascriptInterface
         public boolean isEarphonesPlugged() { return MainActivity.this.isEarphonesPlugged(); }

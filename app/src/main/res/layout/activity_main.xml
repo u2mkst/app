@@ -120,6 +120,6 @@
         android:includeFontPadding="false"
         android:background="@drawable/bg_home_button"
         app:backgroundTint="@null"
-        android:elevation="8dp" />
+        android:elevation="10dp" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

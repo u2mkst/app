@@ -3,5 +3,10 @@
     <style name="Base.Theme.KP수학입시학원" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Customize your dark theme here. -->
         <!-- <item name="colorPrimary">@color/my_dark_primary</item> -->
+        <item name="android:fontFamily">@font/paperlogy_semibold</item>
+        <item name="fontFamily">@font/paperlogy_semibold</item>
+        <item name="textAppearanceHeadlineSmall">@style/TextAppearance.KP.HeadlineSmall</item>
+        <item name="textAppearanceBodyMedium">@style/TextAppearance.KP.BodyMedium</item>
+        <item name="textAppearanceLabelLarge">@style/TextAppearance.KP.LabelLarge</item>
     </style>
 </resources>
