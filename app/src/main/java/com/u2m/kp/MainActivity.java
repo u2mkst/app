@@ -8,6 +8,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -58,6 +60,8 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.drawable.DrawableCompat;
+
+import java.util.List;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import java.io.File;
@@ -317,9 +321,14 @@ public class MainActivity extends AppCompatActivity {
                     return true;
                 }
 
+                // 🔒 잘못된(자체서명/만료/호스트 불일치) 인증서는 무조건 거부한다.
+                // proceed()로 무시하면 같은 네트워크의 공격자가 중간자 공격으로
+                // 모든 HTTPS 트래픽을 가로챌 수 있게 되므로 절대 허용하지 않는다.
                 @Override
                 public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                    handler.proceed();
+                    Log.e(TAG, "SSL 인증서 오류로 접속 차단: " + error);
+                    Toast.makeText(MainActivity.this, "🔒 안전하지 않은 연결이라 접속을 차단했습니다.", Toast.LENGTH_SHORT).show();
+                    handler.cancel();
                 }
 
                 @Override
@@ -704,6 +713,31 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             Log.e(TAG, "앱 고정 해제 실패: " + e.getMessage());
         }
+
+        // 🏠 우리 앱이 기본 홈(런처)으로 지정돼 있으면, 그냥 종료해도 시스템이
+        // "홈 화면이 항상 떠 있어야 한다"는 규칙 때문에 즉시 우리 앱을 다시 띄워버린다.
+        // "항상 이 앱으로" 선택을 초기화하고, 태블릿에 설치된 다른 실제 런처가 있으면
+        // 그 화면을 직접 띄운 뒤에 우리 앱을 종료해야 진짜 바탕화면으로 빠져나갈 수 있다.
+        try {
+            PackageManager pm = getPackageManager();
+            pm.clearPackagePreferredActivities(getPackageName());
+
+            Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+            homeIntent.addCategory(Intent.CATEGORY_HOME);
+            List<ResolveInfo> resolveInfos = pm.queryIntentActivities(homeIntent, PackageManager.MATCH_DEFAULT_ONLY);
+            for (ResolveInfo info : resolveInfos) {
+                String pkg = info.activityInfo.packageName;
+                if (pkg != null && !pkg.equals(getPackageName())) {
+                    homeIntent.setClassName(pkg, info.activityInfo.name);
+                    homeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(homeIntent);
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "다른 런처로 전환 실패: " + e.getMessage());
+        }
+
         finishAffinity();
         System.exit(0);
     }
@@ -952,22 +986,44 @@ public class MainActivity extends AppCompatActivity {
                 lower.contains("instagram") || lower.contains("blog.naver.com");
     }
 
+    // 🔒 허용된 도메인 목록 — 반드시 "정확히 이 호스트이거나, 이 호스트의 서브도메인"일 때만
+    // 통과시킨다. 예전에는 URL 문자열 전체에 이 글자들이 "포함"되기만 해도 통과였어서
+    // https://공격자도메인.com/?x=u2math.co.kr 같은 URL도 내부 웹뷰(전역 JS 브릿지 노출 상태)에
+    // 그대로 로드될 수 있었다.
+    private static final String[] ALLOWED_HOSTS = {
+            "u2mkst.github.io", "u2math.co.kr", "mathflat.com", "litt.ly", "mathflat.co.kr"
+    };
+
     private boolean isExternalUrl(String url) {
         if (url == null) return true;
-        String lower = url.toLowerCase();
-        return !(lower.contains("u2mkst.github.io") || lower.contains("u2math.co.kr") ||
-                lower.contains("mathflat.com") || lower.contains("litt.ly") || lower.contains("mathflat.co.kr"));
+        String host = Uri.parse(url).getHost();
+        if (host == null) return true;
+        host = host.toLowerCase();
+        for (String allowed : ALLOWED_HOSTS) {
+            if (host.equals(allowed) || host.endsWith("." + allowed)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // 🔒 JS 문자열 리터럴에 값을 끼워 넣기 전, 따옴표/역슬래시 등을 이스케이프한다.
+    // (org.json.JSONObject.quote()는 앞뒤 큰따옴표까지 포함한 안전한 JS 문자열을 만들어준다.)
+    private static String toJsStringLiteral(String value) {
+        return org.json.JSONObject.quote(value == null ? "" : value);
     }
 
     // 🔑 유투엠(U2M) 자동 로그인 JS 코드 주입
     private void injectOriginalU2MCode(WebView view, final String id, final String pw) {
+        String jsId = toJsStringLiteral(id);
+        String jsPw = toJsStringLiteral(pw);
         String jsCode = "javascript:(function() {" +
                 "    var idInput = document.getElementById('input_01') || document.querySelector('input[name=\"LOGIN_ID\"]');" +
                 "    var pwInput = document.getElementById('input_02') || document.querySelector('input[name=\"LOGIN_PWD\"]');" +
                 "    var loginBtn = document.querySelector('.login_btn');" +
                 "    if (idInput && pwInput && loginBtn && idInput.value === '') {" +
-                "        idInput.value = '" + id + "';" +
-                "        pwInput.value = '" + pw + "';" +
+                "        idInput.value = " + jsId + ";" +
+                "        pwInput.value = " + jsPw + ";" +
                 "        setTimeout(function() { loginBtn.click(); }, 200);" +
                 "    }" +
                 "})()";
@@ -976,6 +1032,8 @@ public class MainActivity extends AppCompatActivity {
 
     // 🔑 매스플랫(Mathflat) 자동 로그인 JS 코드 주입
     private void injectMathflatCode(WebView view, final String id, final String pw) {
+        String jsId = toJsStringLiteral(id);
+        String jsPw = toJsStringLiteral(pw);
         String jsCode = "javascript:(function() {" +
                 "    var maxAttempts = 40;" +
                 "    var attempts = 0;" +
@@ -987,13 +1045,13 @@ public class MainActivity extends AppCompatActivity {
                 "            clearInterval(checkExist);" +
                 "            var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;" +
                 "            if (nativeSetter) {" +
-                "                nativeSetter.call(idInput, '" + id + "');" +
+                "                nativeSetter.call(idInput, " + jsId + ");" +
                 "                idInput.dispatchEvent(new Event('input', { bubbles: true }));" +
-                "                nativeSetter.call(pwInput, '" + pw + "');" +
+                "                nativeSetter.call(pwInput, " + jsPw + ");" +
                 "                pwInput.dispatchEvent(new Event('input', { bubbles: true }));" +
                 "            } else {" +
-                "                idInput.value = '" + id + "';" +
-                "                pwInput.value = '" + pw + "';" +
+                "                idInput.value = " + jsId + ";" +
+                "                pwInput.value = " + jsPw + ";" +
                 "            }" +
                 "            setTimeout(function() { loginBtn.click(); }, 200);" +
                 "        }" +
