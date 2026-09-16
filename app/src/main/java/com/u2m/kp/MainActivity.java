@@ -1141,9 +1141,6 @@ public class MainActivity extends AppCompatActivity {
         public int getBatteryLevel() { return MainActivity.this.getBatteryLevel(); }
 
         @JavascriptInterface
-        public void rebootDevice() { finishAffinity(); System.exit(0); }
-
-        @JavascriptInterface
         public boolean isEarphonesPlugged() { return MainActivity.this.isEarphonesPlugged(); }
 
         @JavascriptInterface
