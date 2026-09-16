@@ -39,7 +39,6 @@ import android.webkit.ConsoleMessage;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.SslErrorHandler;
-import android.webkit.WebBackForwardList;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -440,32 +439,18 @@ public class MainActivity extends AppCompatActivity {
 
             // Javascript Interface 등록
             webView.addJavascriptInterface(new AndroidBridge(), "AndroidApp");
+            // 🔐 앱을 완전히 종료했다 다시 켜는 경우(화면 꺼짐이 아니라 프로세스 자체가
+            // 새로 시작하는 경우)에는 화면 꺼짐 브로드캐스트가 못 잡으므로, 매 콜드 스타트마다
+            // 한 번 더 세션을 정리해서 이전 사용자로 자동 로그인되는 일을 막는다.
+            executeSessionClear();
             webView.loadUrl("https://u2mkst.github.io/home/login");
 
-            // 뒤로가기 처리
+            // 🚫 뒤로가기 완전 차단 — 화면 이동은 무조건 플로팅 홈 버튼으로만 하도록 강제한다.
+            // (관리자 종료는 상단 종료 아이콘(ivQuit)으로 별도 접근 가능하므로 뒤로가기에 묶을 필요 없음)
             getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
                 @Override
                 public void handleOnBackPressed() {
-                    if (webView.canGoBack()) {
-                        WebBackForwardList backList = webView.copyBackForwardList();
-                        int currentIndex = backList.getCurrentIndex();
-
-                        if (currentIndex > 0) {
-                            String previousUrl = backList.getItemAtIndex(currentIndex - 1).getUrl();
-
-                            if (previousUrl != null && previousUrl.contains("u2mkst.github.io")) {
-                                Uri uri = Uri.parse(previousUrl);
-                                String path = uri.getPath();
-                                if (path != null && (path.equals("/home") || path.equals("/home/"))) {
-                                    webView.loadUrl("https://u2mkst.github.io/home");
-                                    return;
-                                }
-                            }
-                        }
-                        webView.goBack();
-                    } else {
-                        showAdminPasswordDialog();
-                    }
+                    Toast.makeText(MainActivity.this, "🏠 홈 버튼을 이용해 주세요.", Toast.LENGTH_SHORT).show();
                 }
             });
 
