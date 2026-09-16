@@ -24,6 +24,13 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Google removed the legacy "tools" package that this action installs by
+          # default, so it now fails unconditionally with "Failed to find package
+          # 'tools'" unless we override it. platform-tools is the only piece we
+          # actually need here — Gradle's Android plugin downloads the specific
+          # platform/build-tools versions itself during the build.
+          packages: "platform-tools"
 
       - name: Decode keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
