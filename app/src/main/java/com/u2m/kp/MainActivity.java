@@ -1,5 +1,6 @@
 package com.u2m.kp;
 
+import android.Manifest;
 import android.app.ActivityManager;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
@@ -55,10 +56,15 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.OnBackPressedCallback;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.drawable.DrawableCompat;
+
+import com.journeyapps.barcodescanner.ScanContract;
+import com.journeyapps.barcodescanner.ScanOptions;
 
 import java.util.List;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
@@ -93,8 +99,25 @@ public class MainActivity extends AppCompatActivity {
     private ImageView ivBattery;
     private ImageView ivNetworkStatus;
     private ImageView ivQuit;
+    private ImageView ivQrScan;
     private final Handler clockHandler = new Handler(Looper.getMainLooper());
     private Runnable clockRunnable;
+
+    // 📷 QR 스캔 — 결과 콜백/권한 요청은 onCreate 이전(필드 초기화 시점)에 등록해야 한다.
+    private final ActivityResultLauncher<ScanOptions> qrScanLauncher =
+            registerForActivityResult(new ScanContract(), result -> {
+                if (result.getContents() != null) {
+                    onQrCodeScanned(result.getContents());
+                }
+            });
+    private final ActivityResultLauncher<String> cameraPermissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
+                if (granted) {
+                    launchQrScanner();
+                } else {
+                    Toast.makeText(this, "QR 스캔을 위해 카메라 권한이 필요합니다.", Toast.LENGTH_SHORT).show();
+                }
+            });
 
     // 자동 로그인 계정 저장 변수
     private String savedU2mId = "";
@@ -153,6 +176,7 @@ public class MainActivity extends AppCompatActivity {
             ivBattery = findViewById(R.id.ivBattery);
             ivNetworkStatus = findViewById(R.id.ivNetworkStatus);
             ivQuit = findViewById(R.id.ivQuit);
+            ivQrScan = findViewById(R.id.ivQrScan);
 
             if (webView == null) {
                 throw new NullPointerException("❌ [XML 매칭 실패] activity_main.xml에 'webView' ID가 존재하지 않습니다.");
@@ -187,6 +211,18 @@ public class MainActivity extends AppCompatActivity {
             // ⛔ 상단 상태 바 종료 버튼 — 관리자 비밀번호 확인 후 앱 종료
             if (ivQuit != null) {
                 ivQuit.setOnClickListener(v -> showAdminPasswordDialog());
+            }
+
+            // 📷 상단 상태 바 QR 스캔 버튼
+            if (ivQrScan != null) {
+                ivQrScan.setOnClickListener(v -> {
+                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                            == PackageManager.PERMISSION_GRANTED) {
+                        launchQrScanner();
+                    } else {
+                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA);
+                    }
+                });
             }
 
             // 🔄 당겨서 새로고침 리스너
@@ -759,6 +795,35 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             Log.e(TAG, "APK 설치 인텐트 실행 실패: " + e.getMessage());
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 📷 QR 코드 스캔
+    // ---------------------------------------------------------------------------------------------
+
+    private void launchQrScanner() {
+        ScanOptions options = new ScanOptions();
+        options.setDesiredBarcodeFormats(ScanOptions.QR_CODE);
+        options.setPrompt("QR 코드를 스캔해 주세요");
+        options.setBeepEnabled(true);
+        options.setOrientationLocked(true);
+        // 태블릿을 화면이 보이는 방향(사용자 쪽)으로 거치해두고 쓰는 경우가 많아, 뒤집지
+        // 않고 바로 스캔할 수 있도록 후면 대신 전면(셀카) 카메라를 강제로 사용한다.
+        options.setCameraId(1); // 0 = 후면, 1 = 전면
+        qrScanLauncher.launch(options);
+    }
+
+    // 🔮 지금은 스캔 결과를 웹 페이지로 그대로 전달해주기만 한다 — QR을 찍었을 때 실제로
+    // 무엇을 보여줄지(이벤트, 쿠폰, 특정 페이지 이동 등)는 아직 정해지지 않았으므로,
+    // index.html 쪽에서 window.onKstQrScanned(content)를 구현하면 그 내용으로 원하는
+    // 동작을 나중에 자유롭게 확장할 수 있도록 훅만 걸어둔다.
+    private void onQrCodeScanned(String content) {
+        Log.d(TAG, "QR 스캔 결과: " + content);
+        if (webView != null) {
+            String js = "window.onKstQrScanned && window.onKstQrScanned(" + toJsStringLiteral(content) + ");";
+            webView.evaluateJavascript(js, null);
+        }
+        Toast.makeText(this, "QR 스캔 완료", Toast.LENGTH_SHORT).show();
     }
 
     // ---------------------------------------------------------------------------------------------

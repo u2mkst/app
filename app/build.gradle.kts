@@ -67,6 +67,8 @@ dependencies {
     implementation(libs.constraintlayout)
     implementation(libs.material)
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+    // 📷 QR 코드 스캔 — 카메라 화면/디코딩을 전부 알아서 처리해주는 표준 라이브러리
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.espresso.core)
