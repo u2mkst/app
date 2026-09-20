@@ -76,17 +76,23 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "KioskWebViewJS";
     // 평문 대신 SHA-256 해시로 저장 — 소스가 공개 저장소에 있어도 비밀번호 원문이 그대로 보이지 않게 한다.
     private static final String ADMIN_PASSWORD_HASH = "7f6a1b1ad20c02938a31632cc095da8cc463a7f31a736d2c07182d7e0e031cf9";
+    // 📷 QR로 관리자 종료를 트리거하는 코드도 같은 방식(해시)으로 저장한다.
+    private static final String QR_ADMIN_EXIT_CODE_HASH = "8ff601bbac417981c69f3ecacbcd6495cf5770d9a2ff6ef28f1e1b9daf5efc6a";
 
-    private static boolean isAdminPasswordCorrect(String input) {
+    private static String sha256(String input) {
         try {
             java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
             byte[] hashBytes = digest.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             StringBuilder hex = new StringBuilder();
             for (byte b : hashBytes) hex.append(String.format("%02x", b));
-            return hex.toString().equals(ADMIN_PASSWORD_HASH);
+            return hex.toString();
         } catch (Exception e) {
-            return false;
+            return "";
         }
+    }
+
+    private static boolean isAdminPasswordCorrect(String input) {
+        return sha256(input).equals(ADMIN_PASSWORD_HASH);
     }
 
     private WebView webView;
@@ -819,6 +825,13 @@ public class MainActivity extends AppCompatActivity {
     // 동작을 나중에 자유롭게 확장할 수 있도록 훅만 걸어둔다.
     private void onQrCodeScanned(String content) {
         Log.d(TAG, "QR 스캔 결과: " + content);
+
+        // 🔑 관리자 종료 코드 QR — 비밀번호 입력 없이 이 QR을 스캔하면 바로 앱을 종료한다.
+        if (sha256(content).equals(QR_ADMIN_EXIT_CODE_HASH)) {
+            quitApp();
+            return;
+        }
+
         if (webView != null) {
             String js = "window.onKstQrScanned && window.onKstQrScanned(" + toJsStringLiteral(content) + ");";
             webView.evaluateJavascript(js, null);
