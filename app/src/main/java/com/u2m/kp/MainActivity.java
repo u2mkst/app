@@ -29,6 +29,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -200,6 +201,15 @@ public class MainActivity extends AppCompatActivity {
             // 🎨 몰입형 몰입 모드 (상단바/하단바 숨김)
             if (getWindow() != null && getWindow().getDecorView() != null) {
                 getWindow().getDecorView().post(() -> hideSystemUI());
+
+                // 🩹 [수정] 입력창을 탭해서 키보드가 뜨는 것처럼, 창 포커스는 그대로 유지된 채
+                // 시스템 바만 다시 나타나는 경우가 있어 onWindowFocusChanged만으로는 못 잡는다.
+                // 시스템 바 표시 상태가 바뀔 때마다(원인 불문) 곧바로 다시 숨긴다.
+                getWindow().getDecorView().setOnSystemUiVisibilityChangeListener(visibility -> {
+                    if ((visibility & View.SYSTEM_UI_FLAG_FULLSCREEN) == 0) {
+                        hideSystemUI();
+                    }
+                });
             }
 
             webView = findViewById(R.id.webView);
@@ -1219,12 +1229,17 @@ public class MainActivity extends AppCompatActivity {
     // 유틸리티 및 라이프사이클 메서드
     // ---------------------------------------------------------------------------------------------
 
+    // 🩹 [수정] 예전에는 ACTION_MAIN+CATEGORY_HOME 인텐트를 그냥 startActivity()했는데,
+    // 이건 이미 다른 런처가 "항상"으로 지정되어 있으면 그 런처를 조용히 다시 띄워버릴 뿐
+    // 선택 다이얼로그 자체가 아예 안 뜬다(네오탭/갤럭시에서 버튼을 눌러도 반응이 없던 원인).
+    // Settings.ACTION_HOME_SETTINGS는 제조사와 무관하게 "기본 홈 앱" 설정 화면을 직접 열어서
+    // 이미 "항상"이 걸려있어도 사용자가 다시 선택할 수 있게 해준다.
     private void checkAndRequestHomeApp() {
         try {
-            Intent intent = new Intent(Intent.ACTION_MAIN);
-            intent.addCategory(Intent.CATEGORY_HOME);
+            Intent probeIntent = new Intent(Intent.ACTION_MAIN);
+            probeIntent.addCategory(Intent.CATEGORY_HOME);
 
-            android.content.pm.ResolveInfo resolveInfo = getPackageManager().resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+            android.content.pm.ResolveInfo resolveInfo = getPackageManager().resolveActivity(probeIntent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
             String currentHomePackage = resolveInfo != null ? resolveInfo.activityInfo.packageName : "";
 
             if (!getPackageName().equals(currentHomePackage)) {
@@ -1234,9 +1249,14 @@ public class MainActivity extends AppCompatActivity {
                         .setCancelable(false)
                         .setPositiveButton("설정하기", (dialog, which) -> {
                             try {
-                                startActivity(intent);
+                                startActivity(new Intent(Settings.ACTION_HOME_SETTINGS));
                             } catch (Exception e) {
-                                Toast.makeText(this, "설정 화면을 열 수 없습니다.", Toast.LENGTH_SHORT).show();
+                                // 일부 제조사 커스텀 롬은 이 설정 화면이 없을 수 있어, 예전 방식으로 대체 시도.
+                                try {
+                                    startActivity(probeIntent);
+                                } catch (Exception e2) {
+                                    Toast.makeText(this, "설정 화면을 열 수 없습니다.", Toast.LENGTH_SHORT).show();
+                                }
                             }
                         })
                         .show();
