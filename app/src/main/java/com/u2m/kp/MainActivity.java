@@ -893,6 +893,7 @@ public class MainActivity extends AppCompatActivity {
     // 🔵 블루투스도 네트워크와 같은 이유로 시스템 설정 대신 앱 안에서 상태를 보여준다.
     private void showBluetoothDialog() {
         StringBuilder sb = new StringBuilder();
+        sb.append("⚠️ 블루투스는 선생님의 허락을 받고 사용해주세요.\n\n");
         try {
             android.bluetooth.BluetoothManager bluetoothManager =
                     (android.bluetooth.BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
