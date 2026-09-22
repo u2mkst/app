@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Wi-Fi 신호 세기 0/4 (연결은 됐지만 신호가 거의 없음) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#66FFFFFF"
+        android:pathData="M1,14L5,14L5,20L1,20Z M7,10L11,10L11,20L7,20Z M13,6L17,6L17,20L13,20Z M19,2L23,2L23,20L19,20Z" />
+</vector>

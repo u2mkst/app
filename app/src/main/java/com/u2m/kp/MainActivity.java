@@ -135,6 +135,8 @@ public class MainActivity extends AppCompatActivity {
                 lastHeartbeatAt = System.currentTimeMillis(); // 재시도 직후 곧바로 다시 발동하는 것 방지
                 if (webView != null) webView.reload();
             }
+            // 📶 Wi-Fi 신호 세기는 연결/해제 이벤트 없이도 계속 바뀌므로, 같은 주기로 같이 갱신한다.
+            updateNetworkStatusIcon();
             watchdogHandler.postDelayed(this, WATCHDOG_CHECK_INTERVAL_MS);
         }
     };
@@ -763,19 +765,53 @@ public class MainActivity extends AppCompatActivity {
         view.evaluateJavascript(js, null);
     }
 
-    // 📶 상단 상태 바의 네트워크 아이콘을 현재 연결 상태로 갱신 (기기마다 다르게 보이는
-    // 이모지 대신 통일된 벡터 아이콘 두 종류만 사용: 연결됨 / 끊김)
+    // 📶 상단 상태 바의 네트워크 아이콘을 현재 연결 상태로 갱신. Wi-Fi로 붙어있을 때는
+    // 연결/끊김 2단계 대신 실제 신호 세기(0~4단계) 막대로 보여줘서, "왜 느린지"를
+    // 다이얼로그를 열어보지 않아도 한눈에 알 수 있게 한다.
     private void updateNetworkStatusIcon() {
         if (ivNetworkStatus == null) return;
         boolean hasInternet = false;
+        boolean isWifi = false;
         try {
             ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
             NetworkCapabilities capabilities = cm != null ? cm.getNetworkCapabilities(cm.getActiveNetwork()) : null;
             hasInternet = capabilities != null && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+            isWifi = capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
         } catch (Exception e) {
             Log.e(TAG, "네트워크 상태 확인 실패: " + e.getMessage());
         }
-        ivNetworkStatus.setImageResource(hasInternet ? R.drawable.ic_network_connected : R.drawable.ic_network_disconnected);
+
+        if (!hasInternet) {
+            ivNetworkStatus.setImageResource(R.drawable.ic_network_disconnected);
+            return;
+        }
+
+        if (isWifi) {
+            ivNetworkStatus.setImageResource(getWifiSignalIcon());
+        } else {
+            ivNetworkStatus.setImageResource(R.drawable.ic_network_connected);
+        }
+    }
+
+    // 📶 현재 Wi-Fi RSSI를 0~4단계로 환산해 그에 맞는 신호 막대 아이콘을 고른다.
+    private int getWifiSignalIcon() {
+        try {
+            android.net.wifi.WifiManager wifiManager =
+                    (android.net.wifi.WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            android.net.wifi.WifiInfo wifiInfo = wifiManager != null ? wifiManager.getConnectionInfo() : null;
+            if (wifiInfo == null) return R.drawable.ic_network_connected;
+
+            int level = android.net.wifi.WifiManager.calculateSignalLevel(wifiInfo.getRssi(), 5); // 0~4
+            switch (level) {
+                case 0: return R.drawable.ic_wifi_signal_0;
+                case 1: return R.drawable.ic_wifi_signal_1;
+                case 2: return R.drawable.ic_wifi_signal_2;
+                case 3: return R.drawable.ic_wifi_signal_3;
+                default: return R.drawable.ic_network_connected; // 4단계(최대) = 기존 풀 신호 아이콘
+            }
+        } catch (Exception e) {
+            return R.drawable.ic_network_connected;
+        }
     }
 
     // 📶 시스템 설정으로 못 나가는 화면 고정 상태를 위한 대체 화면 — 네트워크 상태를
