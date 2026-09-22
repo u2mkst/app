@@ -29,7 +29,6 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
-import android.provider.Settings;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -76,17 +75,23 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "KioskWebViewJS";
     // 평문 대신 SHA-256 해시로 저장 — 소스가 공개 저장소에 있어도 비밀번호 원문이 그대로 보이지 않게 한다.
     private static final String ADMIN_PASSWORD_HASH = "7f6a1b1ad20c02938a31632cc095da8cc463a7f31a736d2c07182d7e0e031cf9";
+    // 📷 QR로 관리자 종료를 트리거하는 코드도 같은 방식(해시)으로 저장한다.
+    private static final String QR_ADMIN_EXIT_CODE_HASH = "8ff601bbac417981c69f3ecacbcd6495cf5770d9a2ff6ef28f1e1b9daf5efc6a";
 
-    private static boolean isAdminPasswordCorrect(String input) {
+    private static String sha256(String input) {
         try {
             java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
             byte[] hashBytes = digest.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             StringBuilder hex = new StringBuilder();
             for (byte b : hashBytes) hex.append(String.format("%02x", b));
-            return hex.toString().equals(ADMIN_PASSWORD_HASH);
+            return hex.toString();
         } catch (Exception e) {
-            return false;
+            return "";
         }
+    }
+
+    private static boolean isAdminPasswordCorrect(String input) {
+        return sha256(input).equals(ADMIN_PASSWORD_HASH);
     }
 
     private WebView webView;
@@ -100,8 +105,41 @@ public class MainActivity extends AppCompatActivity {
     private ImageView ivNetworkStatus;
     private ImageView ivQuit;
     private ImageView ivQrScan;
+    private ImageView ivBluetooth;
     private final Handler clockHandler = new Handler(Looper.getMainLooper());
     private Runnable clockRunnable;
+
+    private final ActivityResultLauncher<String> bluetoothPermissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
+                if (granted) {
+                    showBluetoothDialog();
+                } else {
+                    Toast.makeText(this, "블루투스 정보를 보려면 권한이 필요합니다.", Toast.LENGTH_SHORT).show();
+                }
+            });
+
+    // 🐶 워치독 — 페이지의 JS가 하트비트를 못 보낼 만큼 오래 멈춰있으면(먹통) 자동으로
+    // WebView를 새로고침한다. 값은 index.html에서 evaluateJavascript로 주입한
+    // setInterval 하트비트가 AndroidBridge.reportHeartbeat()를 부를 때마다 갱신된다.
+    private static final long WATCHDOG_TIMEOUT_MS = 5 * 60 * 1000;
+    private static final long WATCHDOG_CHECK_INTERVAL_MS = 60 * 1000;
+    private volatile long lastHeartbeatAt = System.currentTimeMillis();
+    private Long lastRendererCrashAt = null;
+    private boolean hasLoadedContentOnce = false;
+    private final Handler watchdogHandler = new Handler(Looper.getMainLooper());
+    private final Runnable watchdogRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (System.currentTimeMillis() - lastHeartbeatAt > WATCHDOG_TIMEOUT_MS) {
+                Log.e(TAG, "🐶 워치독: " + (WATCHDOG_TIMEOUT_MS / 60000) + "분간 응답 없음 — WebView를 새로고침합니다.");
+                lastHeartbeatAt = System.currentTimeMillis(); // 재시도 직후 곧바로 다시 발동하는 것 방지
+                if (webView != null) webView.reload();
+            }
+            // 📶 Wi-Fi 신호 세기는 연결/해제 이벤트 없이도 계속 바뀌므로, 같은 주기로 같이 갱신한다.
+            updateNetworkStatusIcon();
+            watchdogHandler.postDelayed(this, WATCHDOG_CHECK_INTERVAL_MS);
+        }
+    };
 
     // 📷 QR 스캔 — 결과 콜백/권한 요청은 onCreate 이전(필드 초기화 시점)에 등록해야 한다.
     private final ActivityResultLauncher<ScanOptions> qrScanLauncher =
@@ -142,11 +180,7 @@ public class MainActivity extends AppCompatActivity {
         // 🚨 1. 치명적 크래시 발생 시 자동 재시작 복구 핸들러
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
             Log.e(TAG, "🚨 치명적 크래시 발생! 앱을 자동으로 재시작합니다: " + throwable.getMessage());
-            Intent intent = new Intent(MainActivity.this, MainActivity.class);
-            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-            startActivity(intent);
-            Process.killProcess(Process.myPid());
-            System.exit(10);
+            restartApp();
         });
 
         super.onCreate(savedInstanceState);
@@ -177,34 +211,55 @@ public class MainActivity extends AppCompatActivity {
             ivNetworkStatus = findViewById(R.id.ivNetworkStatus);
             ivQuit = findViewById(R.id.ivQuit);
             ivQrScan = findViewById(R.id.ivQrScan);
+            ivBluetooth = findViewById(R.id.ivBluetooth);
 
             if (webView == null) {
                 throw new NullPointerException("❌ [XML 매칭 실패] activity_main.xml에 'webView' ID가 존재하지 않습니다.");
             }
 
-            // 🕒 상단 상태 바 시계 (1초마다 갱신)
+            // 🕒 상단 상태 바 왼쪽 — 학원 이름 · 오늘 날짜(요일) · 시각을 한 줄로 (1초마다 갱신)
             if (tvClock != null) {
                 clockRunnable = new Runnable() {
+                    private final java.text.SimpleDateFormat dateFormat =
+                            new java.text.SimpleDateFormat("M/d(E)", java.util.Locale.KOREAN);
+                    private final java.text.SimpleDateFormat timeFormat =
+                            new java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault());
+
                     @Override
                     public void run() {
-                        tvClock.setText(new java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(new java.util.Date()));
+                        java.util.Date now = new java.util.Date();
+                        tvClock.setText("K&P · " + dateFormat.format(now) + " " + timeFormat.format(now));
                         clockHandler.postDelayed(this, 1000);
                     }
                 };
                 clockHandler.post(clockRunnable);
             }
 
-            // 📶 상단 상태 바 네트워크 아이콘 탭 시 네트워크 설정 화면으로 이동
+            // 📶 상단 상태 바 네트워크 아이콘 — 앱이 화면 고정(Lock Task) 상태라 시스템
+            // 설정 화면으로는 어차피 못 나가므로, 대신 앱 안에서 바로 네트워크 정보를 보여준다.
             if (ivNetworkStatus != null) {
-                ivNetworkStatus.setOnClickListener(v -> {
-                    try {
-                        startActivity(new Intent(Settings.ACTION_WIRELESS_SETTINGS));
-                    } catch (Exception e) {
-                        startActivity(new Intent(Settings.ACTION_SETTINGS));
-                    }
-                });
+                ivNetworkStatus.setOnClickListener(v -> showNetworkInfoDialog());
                 updateNetworkStatusIcon();
             }
+
+            // 🔵 상단 상태 바 블루투스 아이콘 — 네트워크 아이콘과 같은 이유로 설정 화면 대신
+            // 앱 안에서 블루투스 상태/페어링된 기기 목록을 보여준다.
+            if (ivBluetooth != null) {
+                ivBluetooth.setOnClickListener(v -> {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+                            || ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
+                                    == PackageManager.PERMISSION_GRANTED) {
+                        showBluetoothDialog();
+                    } else {
+                        bluetoothPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT);
+                    }
+                });
+            }
+
+            // 🐶 워치독 시작 — 첫 페이지가 뜨기 전까지는 하트비트가 없는 게 정상이므로
+            // 시작 시각을 기준으로 삼고, 첫 체크 주기가 지날 때까지는 발동하지 않는다.
+            lastHeartbeatAt = System.currentTimeMillis();
+            watchdogHandler.postDelayed(watchdogRunnable, WATCHDOG_CHECK_INTERVAL_MS);
 
             updateBatteryStatusText();
 
@@ -366,6 +421,18 @@ public class MainActivity extends AppCompatActivity {
                     handler.cancel();
                 }
 
+                // 🩹 WebView 렌더러 프로세스가 (메모리 부족 등으로) 따로 죽는 경우 —
+                // 일반 크래시 핸들러로는 못 잡기 때문에 화면이 그대로 멈춰버릴 수 있다.
+                // 죽은 렌더러가 붙어있던 WebView는 재사용이 안 되므로 앱 자체를 재시작한다.
+                @Override
+                public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+                    lastRendererCrashAt = System.currentTimeMillis();
+                    Log.e(TAG, "🚨 WebView 렌더러 프로세스 종료 감지(crashed=" + detail.didCrash() + ") — 앱을 재시작합니다.");
+                    if (view != null) view.destroy();
+                    restartApp();
+                    return true;
+                }
+
                 @Override
                 public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                     super.onReceivedError(view, request, error);
@@ -376,6 +443,14 @@ public class MainActivity extends AppCompatActivity {
 
                     if (request.isForMainFrame()) {
                         Log.w(TAG, "⚠️ 네트워크 끊김 감지: " + error.getDescription());
+
+                        // 🩹 화면에 이미 콘텐츠가 떠 있던 상태에서 잠깐 끊긴 거라면, 화면 전체를
+                        // 에러 페이지로 덮어써서 지우는 대신 작은 안내만 띄운다 — 재연결되면
+                        // registerNetworkCallback()의 onAvailable()이 알아서 새로고침해준다.
+                        if (hasLoadedContentOnce && !isShowingNetworkErrorPage) {
+                            Toast.makeText(MainActivity.this, "📶 인터넷 연결이 끊겼습니다. 재연결되면 자동으로 새로고침됩니다.", Toast.LENGTH_LONG).show();
+                            return;
+                        }
 
                         String failedUrl = request.getUrl() != null ? request.getUrl().toString() : "https://u2mkst.github.io/home";
                         String retryUrl = failedUrl.replace("\\", "\\\\").replace("'", "\\'");
@@ -430,8 +505,10 @@ public class MainActivity extends AppCompatActivity {
                     // 실제 콘텐츠 경로(/home, /login 등)로 넘어간 경우에만 에러 상태를 해제한다.
                     if (!"https://u2mkst.github.io/".equals(url)) {
                         isShowingNetworkErrorPage = false;
+                        hasLoadedContentOnce = true;
                     }
 
+                    injectHeartbeatBridge(view);
                     injectScrollBridge(view);
                     checkAndToggleHomeButton(url);
                     if (url == null) return;
@@ -660,6 +737,20 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // 🐶 워치독 하트비트 — 페이지의 JS 실행이 살아있다는 걸 30초마다 네이티브에 알린다.
+    // 이 신호가 WATCHDOG_TIMEOUT_MS 이상 끊기면 페이지가 먹통이 된 것으로 보고 자동 새로고침한다.
+    private void injectHeartbeatBridge(WebView view) {
+        if (view == null) return;
+        String js = "(function(){" +
+                "if(window.__kpHeartbeatInstalled)return;" +
+                "window.__kpHeartbeatInstalled=true;" +
+                "function beat(){window.AndroidApp&&window.AndroidApp.reportHeartbeat&&window.AndroidApp.reportHeartbeat();}" +
+                "beat();" +
+                "setInterval(beat,30000);" +
+                "})();";
+        view.evaluateJavascript(js, null);
+    }
+
     // 🔄 페이지 안의 내부 스크롤 div(랭킹/시간표 패널 등)까지 감안한 당겨서 새로고침 제어.
     // WebView 자체(document)는 스크롤이 안 되고 내부 div가 overflow-y로 스크롤되는
     // 화면에서는 canScrollVertically(-1)/getScrollY()가 항상 0을 가리켜서, 내부 스크롤이
@@ -680,19 +771,207 @@ public class MainActivity extends AppCompatActivity {
         view.evaluateJavascript(js, null);
     }
 
-    // 📶 상단 상태 바의 네트워크 아이콘을 현재 연결 상태로 갱신 (기기마다 다르게 보이는
-    // 이모지 대신 통일된 벡터 아이콘 두 종류만 사용: 연결됨 / 끊김)
+    // 📶 상단 상태 바의 네트워크 아이콘을 현재 연결 상태로 갱신. Wi-Fi로 붙어있을 때는
+    // 연결/끊김 2단계 대신 실제 신호 세기(0~4단계) 막대로 보여줘서, "왜 느린지"를
+    // 다이얼로그를 열어보지 않아도 한눈에 알 수 있게 한다.
     private void updateNetworkStatusIcon() {
         if (ivNetworkStatus == null) return;
         boolean hasInternet = false;
+        boolean isWifi = false;
         try {
             ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
             NetworkCapabilities capabilities = cm != null ? cm.getNetworkCapabilities(cm.getActiveNetwork()) : null;
             hasInternet = capabilities != null && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+            isWifi = capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
         } catch (Exception e) {
             Log.e(TAG, "네트워크 상태 확인 실패: " + e.getMessage());
         }
-        ivNetworkStatus.setImageResource(hasInternet ? R.drawable.ic_network_connected : R.drawable.ic_network_disconnected);
+
+        if (!hasInternet) {
+            ivNetworkStatus.setImageResource(R.drawable.ic_network_disconnected);
+            return;
+        }
+
+        if (isWifi) {
+            ivNetworkStatus.setImageResource(getWifiSignalIcon());
+        } else {
+            ivNetworkStatus.setImageResource(R.drawable.ic_network_connected);
+        }
+    }
+
+    // 📶 현재 Wi-Fi RSSI를 0~4단계로 환산해 그에 맞는 신호 막대 아이콘을 고른다.
+    private int getWifiSignalIcon() {
+        try {
+            android.net.wifi.WifiManager wifiManager =
+                    (android.net.wifi.WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            android.net.wifi.WifiInfo wifiInfo = wifiManager != null ? wifiManager.getConnectionInfo() : null;
+            if (wifiInfo == null) return R.drawable.ic_network_connected;
+
+            int level = android.net.wifi.WifiManager.calculateSignalLevel(wifiInfo.getRssi(), 5); // 0~4
+            switch (level) {
+                case 0: return R.drawable.ic_wifi_signal_0;
+                case 1: return R.drawable.ic_wifi_signal_1;
+                case 2: return R.drawable.ic_wifi_signal_2;
+                case 3: return R.drawable.ic_wifi_signal_3;
+                default: return R.drawable.ic_network_connected; // 4단계(최대) = 기존 풀 신호 아이콘
+            }
+        } catch (Exception e) {
+            return R.drawable.ic_network_connected;
+        }
+    }
+
+    // 📶 시스템 설정으로 못 나가는 화면 고정 상태를 위한 대체 화면 — 네트워크 상태를
+    // 직접 조회해서 앱 안 다이얼로그로 보여준다.
+    private void showNetworkInfoDialog() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            android.net.Network activeNetwork = cm != null ? cm.getActiveNetwork() : null;
+            NetworkCapabilities capabilities = cm != null && activeNetwork != null ? cm.getNetworkCapabilities(activeNetwork) : null;
+
+            boolean hasInternet = capabilities != null && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+            boolean validated = capabilities != null && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+            sb.append("연결 상태: ").append(hasInternet ? (validated ? "정상 연결됨" : "연결됨 (인터넷 확인 안 됨)") : "연결 안 됨").append("\n");
+
+            String type = "알 수 없음";
+            if (capabilities != null) {
+                if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) type = "Wi-Fi";
+                else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) type = "모바일 데이터";
+                else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) type = "이더넷";
+            } else {
+                type = "없음";
+            }
+            sb.append("연결 종류: ").append(type).append("\n");
+
+            android.net.LinkProperties linkProperties = cm != null && activeNetwork != null ? cm.getLinkProperties(activeNetwork) : null;
+            if (linkProperties != null && !linkProperties.getLinkAddresses().isEmpty()) {
+                sb.append("IP 주소: ").append(linkProperties.getLinkAddresses().get(0).getAddress().getHostAddress()).append("\n");
+            }
+
+            if ("Wi-Fi".equals(type)) {
+                android.net.wifi.WifiManager wifiManager =
+                        (android.net.wifi.WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                if (wifiManager != null) {
+                    android.net.wifi.WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+                    if (wifiInfo != null) {
+                        String ssid = wifiInfo.getSSID();
+                        if (ssid != null && !ssid.equals("<unknown ssid>")) {
+                            sb.append("SSID: ").append(ssid.replace("\"", "")).append("\n");
+                        }
+                        int level = android.net.wifi.WifiManager.calculateSignalLevel(wifiInfo.getRssi(), 5);
+                        sb.append("신호 세기: ").append(level).append("/4 (").append(wifiInfo.getRssi()).append(" dBm)\n");
+                        sb.append("속도: ").append(wifiInfo.getLinkSpeed()).append(" Mbps");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            sb.append("네트워크 정보를 가져오는 중 오류가 발생했습니다: ").append(e.getMessage());
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("📶 네트워크 상태")
+                .setMessage(sb.toString().trim())
+                .setPositiveButton("Wi-Fi 재연결", (dialog, which) -> reconnectWifi())
+                .setNegativeButton("닫기", null)
+                .show();
+    }
+
+    // 📶 상단 바 네트워크 버튼의 핵심 기능 — 화면 고정 모드에서는 설정 앱으로 나가서
+    // Wi-Fi를 끄고 켜거나 다시 잡아줄 방법이 없으므로, 이미 등록된 네트워크로
+    // 시스템이 알아서 다시 붙도록 직접 재연결을 요청한다.
+    private void reconnectWifi() {
+        try {
+            android.net.wifi.WifiManager wifiManager =
+                    (android.net.wifi.WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            if (wifiManager == null) {
+                Toast.makeText(this, "Wi-Fi를 제어할 수 없는 기기입니다.", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Toast.makeText(this, "📶 Wi-Fi 재연결을 시도합니다...", Toast.LENGTH_SHORT).show();
+            wifiManager.disconnect();
+            wifiManager.reconnect();
+        } catch (Exception e) {
+            Log.e(TAG, "Wi-Fi 재연결 실패: " + e.getMessage());
+            Toast.makeText(this, "Wi-Fi 재연결에 실패했습니다.", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    // 🔵 블루투스도 네트워크와 같은 이유로 시스템 설정 대신 앱 안에서 상태를 보여준다.
+    private void showBluetoothDialog() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("⚠️ 블루투스는 선생님의 허락을 받고 사용해주세요.\n\n");
+        try {
+            android.bluetooth.BluetoothManager bluetoothManager =
+                    (android.bluetooth.BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+            android.bluetooth.BluetoothAdapter adapter = bluetoothManager != null ? bluetoothManager.getAdapter() : null;
+
+            if (adapter == null) {
+                sb.append("이 기기는 블루투스를 지원하지 않습니다.");
+            } else if (!adapter.isEnabled()) {
+                sb.append("블루투스가 꺼져 있습니다.");
+            } else {
+                sb.append("블루투스: 켜짐\n\n페어링된 기기:");
+                try {
+                    java.util.Set<android.bluetooth.BluetoothDevice> bonded = adapter.getBondedDevices();
+                    if (bonded == null || bonded.isEmpty()) {
+                        sb.append("\n(없음)");
+                    } else {
+                        for (android.bluetooth.BluetoothDevice device : bonded) {
+                            sb.append("\n• ").append(device.getName());
+                        }
+                    }
+                } catch (SecurityException se) {
+                    sb.append("\n(권한이 없어 목록을 볼 수 없습니다)");
+                }
+            }
+        } catch (Exception e) {
+            sb.append("블루투스 정보를 가져오는 중 오류가 발생했습니다: ").append(e.getMessage());
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("🔵 블루투스 상태")
+                .setMessage(sb.toString().trim())
+                .setPositiveButton("확인", null)
+                .show();
+    }
+
+    // 🩺 관리자 창의 "진단 정보 보기" — 태블릿까지 직접 가지 않고도 원격으로 물어봐서
+    // 확인할 수 있게, 문제 파악에 필요한 값들을 한 화면에 모아 보여준다.
+    private void showDiagnosticsDialog() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            sb.append("Android 버전: ").append(Build.VERSION.RELEASE).append(" (SDK ").append(Build.VERSION.SDK_INT).append(")\n");
+
+            android.content.pm.PackageInfo webViewPackage = WebView.getCurrentWebViewPackage();
+            sb.append("WebView 버전: ").append(webViewPackage != null ? webViewPackage.versionName : "확인 불가").append("\n");
+
+            android.os.StatFs statFs = new android.os.StatFs(Environment.getDataDirectory().getPath());
+            long freeMb = (statFs.getAvailableBlocksLong() * statFs.getBlockSizeLong()) / (1024 * 1024);
+            sb.append("저장공간 여유: ").append(freeMb).append(" MB\n");
+
+            long secondsSinceHeartbeat = (System.currentTimeMillis() - lastHeartbeatAt) / 1000;
+            sb.append("마지막 페이지 응답: ").append(secondsSinceHeartbeat).append("초 전\n");
+
+            if (lastRendererCrashAt != null) {
+                long minutesAgo = (System.currentTimeMillis() - lastRendererCrashAt) / 60000;
+                sb.append("마지막 WebView 크래시: ").append(minutesAgo).append("분 전\n");
+            } else {
+                sb.append("마지막 WebView 크래시: 없음\n");
+            }
+
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            NetworkCapabilities capabilities = cm != null ? cm.getNetworkCapabilities(cm.getActiveNetwork()) : null;
+            boolean hasInternet = capabilities != null && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+            sb.append("네트워크: ").append(hasInternet ? "연결됨" : "끊김");
+        } catch (Exception e) {
+            sb.append("\n(일부 정보를 가져오지 못했습니다: ").append(e.getMessage()).append(")");
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("🩺 진단 정보")
+                .setMessage(sb.toString().trim())
+                .setPositiveButton("확인", null)
+                .show();
     }
 
     // 🔋 상단 상태 바의 배터리 표시를 현재 잔량으로 초기화
@@ -721,6 +1000,15 @@ public class MainActivity extends AppCompatActivity {
         if (ivBattery != null) {
             ivBattery.setImageResource(isCharging ? R.drawable.ic_battery_charging : R.drawable.ic_battery);
         }
+    }
+
+    // 🚨 크래시/워치독/렌더러 프로세스 종료 등에서 공통으로 쓰는 자동 재시작.
+    private void restartApp() {
+        Intent intent = new Intent(MainActivity.this, MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        startActivity(intent);
+        Process.killProcess(Process.myPid());
+        System.exit(10);
     }
 
     // ⛔ 상단 상태 바 종료 버튼 — 관리자 비밀번호 확인 후 앱 완전 종료
@@ -819,6 +1107,13 @@ public class MainActivity extends AppCompatActivity {
     // 동작을 나중에 자유롭게 확장할 수 있도록 훅만 걸어둔다.
     private void onQrCodeScanned(String content) {
         Log.d(TAG, "QR 스캔 결과: " + content);
+
+        // 🔑 관리자 종료 코드 QR — 비밀번호 입력 없이 이 QR을 스캔하면 바로 앱을 종료한다.
+        if (sha256(content).equals(QR_ADMIN_EXIT_CODE_HASH)) {
+            quitApp();
+            return;
+        }
+
         if (webView != null) {
             String js = "window.onKstQrScanned && window.onKstQrScanned(" + toJsStringLiteral(content) + ");";
             webView.evaluateJavascript(js, null);
@@ -844,6 +1139,7 @@ public class MainActivity extends AppCompatActivity {
             Button btnUpdate = dialogView.findViewById(R.id.btn_update);
             TextView tvBatteryInfo = dialogView.findViewById(R.id.tv_battery_info);
             TextView tvEarphoneInfo = dialogView.findViewById(R.id.tv_earphone_info);
+            TextView btnDiagnostics = dialogView.findViewById(R.id.btn_diagnostics);
 
             tvCurrentVersion.setText("v" + getAppVersionName());
             tvBatteryInfo.setText(getBatteryLevel() + "%");
@@ -859,6 +1155,9 @@ public class MainActivity extends AppCompatActivity {
             });
 
             btnCancel.setOnClickListener(v -> dialog.dismiss());
+            if (btnDiagnostics != null) {
+                btnDiagnostics.setOnClickListener(v -> showDiagnosticsDialog());
+            }
 
             checkForAppUpdate(tvUpdateStatus, btnUpdate);
 
@@ -1041,7 +1340,7 @@ public class MainActivity extends AppCompatActivity {
     // https://공격자도메인.com/?x=u2math.co.kr 같은 URL도 내부 웹뷰(전역 JS 브릿지 노출 상태)에
     // 그대로 로드될 수 있었다.
     private static final String[] ALLOWED_HOSTS = {
-            "u2mkst.github.io", "u2math.co.kr", "mathflat.com", "litt.ly", "mathflat.co.kr"
+            "u2mkst.github.io", "u2math.co.kr", "mathflat.com", "mathflat.co.kr"
     };
 
     private boolean isExternalUrl(String url) {
@@ -1171,6 +1470,12 @@ public class MainActivity extends AppCompatActivity {
 
     // 🌉 JavaScript 연동 인터페이스
     private class AndroidBridge {
+        // 🐶 페이지의 JS가 살아있다는 하트비트 — injectHeartbeatBridge()가 30초마다 호출한다.
+        @JavascriptInterface
+        public void reportHeartbeat() {
+            lastHeartbeatAt = System.currentTimeMillis();
+        }
+
         @JavascriptInterface
         public void loginToU2M(String u2mId, String phone, String mathflatPw) { loginToU2M(u2mId, phone, mathflatPw, ""); }
         @JavascriptInterface
@@ -1232,5 +1537,6 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (clockRunnable != null) clockHandler.removeCallbacks(clockRunnable);
+        watchdogHandler.removeCallbacks(watchdogRunnable);
     }
 }
