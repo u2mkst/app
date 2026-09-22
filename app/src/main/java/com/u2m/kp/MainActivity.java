@@ -1054,7 +1054,7 @@ public class MainActivity extends AppCompatActivity {
     // https://공격자도메인.com/?x=u2math.co.kr 같은 URL도 내부 웹뷰(전역 JS 브릿지 노출 상태)에
     // 그대로 로드될 수 있었다.
     private static final String[] ALLOWED_HOSTS = {
-            "u2mkst.github.io", "u2math.co.kr", "mathflat.com", "litt.ly", "mathflat.co.kr"
+            "u2mkst.github.io", "u2math.co.kr", "mathflat.com", "mathflat.co.kr"
     };
 
     private boolean isExternalUrl(String url) {
