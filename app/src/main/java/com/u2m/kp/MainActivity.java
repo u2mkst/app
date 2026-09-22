@@ -829,8 +829,29 @@ public class MainActivity extends AppCompatActivity {
         new AlertDialog.Builder(this)
                 .setTitle("📶 네트워크 상태")
                 .setMessage(sb.toString().trim())
-                .setPositiveButton("확인", null)
+                .setPositiveButton("Wi-Fi 재연결", (dialog, which) -> reconnectWifi())
+                .setNegativeButton("닫기", null)
                 .show();
+    }
+
+    // 📶 상단 바 네트워크 버튼의 핵심 기능 — 화면 고정 모드에서는 설정 앱으로 나가서
+    // Wi-Fi를 끄고 켜거나 다시 잡아줄 방법이 없으므로, 이미 등록된 네트워크로
+    // 시스템이 알아서 다시 붙도록 직접 재연결을 요청한다.
+    private void reconnectWifi() {
+        try {
+            android.net.wifi.WifiManager wifiManager =
+                    (android.net.wifi.WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            if (wifiManager == null) {
+                Toast.makeText(this, "Wi-Fi를 제어할 수 없는 기기입니다.", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Toast.makeText(this, "📶 Wi-Fi 재연결을 시도합니다...", Toast.LENGTH_SHORT).show();
+            wifiManager.disconnect();
+            wifiManager.reconnect();
+        } catch (Exception e) {
+            Log.e(TAG, "Wi-Fi 재연결 실패: " + e.getMessage());
+            Toast.makeText(this, "Wi-Fi 재연결에 실패했습니다.", Toast.LENGTH_SHORT).show();
+        }
     }
 
     // 🔵 블루투스도 네트워크와 같은 이유로 시스템 설정 대신 앱 안에서 상태를 보여준다.
