@@ -217,12 +217,18 @@ public class MainActivity extends AppCompatActivity {
                 throw new NullPointerException("❌ [XML 매칭 실패] activity_main.xml에 'webView' ID가 존재하지 않습니다.");
             }
 
-            // 🕒 상단 상태 바 시계 (1초마다 갱신)
+            // 🕒 상단 상태 바 왼쪽 — 학원 이름 · 오늘 날짜(요일) · 시각을 한 줄로 (1초마다 갱신)
             if (tvClock != null) {
                 clockRunnable = new Runnable() {
+                    private final java.text.SimpleDateFormat dateFormat =
+                            new java.text.SimpleDateFormat("M/d(E)", java.util.Locale.KOREAN);
+                    private final java.text.SimpleDateFormat timeFormat =
+                            new java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault());
+
                     @Override
                     public void run() {
-                        tvClock.setText(new java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(new java.util.Date()));
+                        java.util.Date now = new java.util.Date();
+                        tvClock.setText("K&P · " + dateFormat.format(now) + " " + timeFormat.format(now));
                         clockHandler.postDelayed(this, 1000);
                     }
                 };
