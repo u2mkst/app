@@ -51,7 +51,7 @@
                 android:paddingEnd="8dp"
                 android:src="@drawable/ic_network_connected"
                 android:scaleType="fitCenter"
-                android:contentDescription="네트워크 상태 (탭하여 설정 열기)"
+                android:contentDescription="네트워크 상태 (탭하여 상세 정보 보기)"
                 app:tint="#FFFFFF" />
 
             <ImageView
@@ -87,6 +87,20 @@
                 android:src="@drawable/ic_qr_scan"
                 android:scaleType="fitCenter"
                 android:contentDescription="QR 코드 스캔" />
+
+            <ImageView
+                android:id="@+id/ivBluetooth"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_marginStart="10dp"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:src="@drawable/ic_bluetooth"
+                android:scaleType="fitCenter"
+                android:contentDescription="블루투스 상태" />
 
             <ImageView
                 android:id="@+id/ivQuit"

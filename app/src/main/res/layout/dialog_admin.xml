@@ -173,6 +173,18 @@
     </LinearLayout>
 
     <TextView
+        android:id="@+id/btn_diagnostics"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="진단 정보 보기"
+        android:textColor="#004BBF"
+        android:textSize="11.5sp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="10dp"
+        android:clickable="true"
+        android:focusable="true"/>
+
+    <TextView
         android:id="@+id/btn_cancel"
         android:layout_width="120dp"
         android:layout_height="48dp"
