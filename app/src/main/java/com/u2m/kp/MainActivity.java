@@ -158,6 +158,10 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
+    // 🏠 홈 앱 역할 요청 — 결과와 무관하게, 응답 후 다시 상태를 확인해 안내창을 갱신한다.
+    private final ActivityResultLauncher<Intent> homeRoleRequestLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> checkAndRequestHomeApp());
+
     // 자동 로그인 계정 저장 변수
     private String savedU2mId = "";
     private String savedPhone = "";
@@ -1248,10 +1252,26 @@ public class MainActivity extends AppCompatActivity {
                         .setMessage("안전한 학습 환경을 위해 이 앱을 태블릿의 '기본 홈 앱'으로 설정해야 합니다.\n\n[설정하기]를 누른 뒤, 목록에서 이 앱을 선택하고 '항상'을 눌러주세요.")
                         .setCancelable(false)
                         .setPositiveButton("설정하기", (dialog, which) -> {
+                            // 1순위: RoleManager의 "홈 앱 되기" 전용 시스템 다이얼로그(API 29+) —
+                            // 제조사 커스터마이징에 가장 덜 휘둘리는, 이 목적을 위한 표준 API.
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                try {
+                                    android.app.role.RoleManager roleManager =
+                                            (android.app.role.RoleManager) getSystemService(Context.ROLE_SERVICE);
+                                    if (roleManager != null && roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME)
+                                            && !roleManager.isRoleHeld(android.app.role.RoleManager.ROLE_HOME)) {
+                                        homeRoleRequestLauncher.launch(roleManager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_HOME));
+                                        return;
+                                    }
+                                } catch (Exception e) {
+                                    Log.e(TAG, "RoleManager 홈 역할 요청 실패: " + e.getMessage());
+                                }
+                            }
+                            // 2순위: 기본 홈 앱 설정 화면.
                             try {
                                 startActivity(new Intent(Settings.ACTION_HOME_SETTINGS));
                             } catch (Exception e) {
-                                // 일부 제조사 커스텀 롬은 이 설정 화면이 없을 수 있어, 예전 방식으로 대체 시도.
+                                // 3순위: 일부 제조사 커스텀 롬은 위 화면이 없을 수 있어, 예전 방식으로 대체.
                                 try {
                                     startActivity(probeIntent);
                                 } catch (Exception e2) {
