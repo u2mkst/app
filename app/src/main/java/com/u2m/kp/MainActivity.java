@@ -412,6 +412,22 @@ public class MainActivity extends AppCompatActivity {
                         return true;
                     }
 
+                    // 🔒 유투엠은 로그인 직후 학원 전용 서브도메인으로 "http://" 주소를 내려준다
+                    // (예: http://swgwanggyo.u2math.co.kr/Login/Go?info=...). 이 앱은
+                    // usesCleartextTraffic=false라 그대로는 ERR_CLEARTEXT_NOT_PERMITTED로 막히므로,
+                    // 허용된 호스트에 한해 https로 올려서 연다(해당 호스트들은 https로도 서비스된다).
+                    if (url.startsWith("http://")) {
+                        String upgraded = "https://" + url.substring("http://".length());
+                        long now = System.currentTimeMillis();
+                        boolean loopSuspected = upgraded.equals(lastUpgradedUrl) && now - lastUpgradedAt < 3000;
+                        if (!loopSuspected && !isBlacklistedUrl(upgraded) && !isExternalUrl(upgraded)) {
+                            lastUpgradedUrl = upgraded;
+                            lastUpgradedAt = now;
+                            view.loadUrl(upgraded);
+                            return true;
+                        }
+                    }
+
                     if (url.toLowerCase().contains(".apk")) {
                         downloadApkFile(url);
                         return true;
@@ -1379,6 +1395,10 @@ public class MainActivity extends AppCompatActivity {
     // 통과시킨다. 예전에는 URL 문자열 전체에 이 글자들이 "포함"되기만 해도 통과였어서
     // https://공격자도메인.com/?x=u2math.co.kr 같은 URL도 내부 웹뷰(전역 JS 브릿지 노출 상태)에
     // 그대로 로드될 수 있었다.
+    // http → https 업그레이드가 서버 리다이렉트와 맞물려 무한 반복되는 걸 막기 위한 기록
+    private String lastUpgradedUrl = null;
+    private long lastUpgradedAt = 0;
+
     private static final String[] ALLOWED_HOSTS = {
             "u2mkst.github.io", "u2math.co.kr", "mathflat.com", "mathflat.co.kr"
     };
