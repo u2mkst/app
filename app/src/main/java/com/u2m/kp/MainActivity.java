@@ -1670,17 +1670,21 @@ public class MainActivity extends AppCompatActivity {
             if (currentUrl == null || !currentUrl.startsWith("https://study.u2math.co.kr/Report/List")) return;
             try {
                 org.json.JSONObject payload = new org.json.JSONObject(json == null ? "{}" : json);
-                if (!"ok".equals(payload.optString("status"))) return;
+                String status = payload.optString("status");
+                if (!"ok".equals(status) && !"empty".equals(status) && !"structure_changed".equals(status)) return;
                 org.json.JSONArray reports = payload.optJSONArray("reports");
-                if (reports == null || reports.length() == 0) return;
+                if ("ok".equals(status) && (reports == null || reports.length() == 0)) return;
                 getSharedPreferences("kst_u2m_report", MODE_PRIVATE)
                         .edit()
                         .putString("reports_json", payload.toString())
                         .putLong("saved_at", System.currentTimeMillis())
                         .apply();
-                runOnUiThread(() -> Toast.makeText(MainActivity.this,
-                        "유투엠 보고서 " + reports.length() + "건을 불러왔어요.",
-                        Toast.LENGTH_SHORT).show());
+                if ("ok".equals(status)) {
+                    final int reportCount = reports.length();
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                            "유투엠 보고서 " + reportCount + "건을 불러왔어요.",
+                            Toast.LENGTH_SHORT).show());
+                }
             } catch (Exception ignored) {
                 // 잘못된 DOM/JSON은 저장하지 않는다.
             }
