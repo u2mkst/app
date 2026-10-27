@@ -575,6 +575,12 @@ public class MainActivity extends AppCompatActivity {
                         CookieManager.getInstance().flush();
                     }
 
+                    // 📊 유투엠 보고서 목록을 열었을 때만 화면에 표시된 보고서 수치를 추출한다.
+                    // 로그인/세션을 새로 만들거나 백그라운드에서 주기적으로 수집하지 않는다.
+                    if (url.startsWith("https://study.u2math.co.kr/Report/List")) {
+                        injectU2MReportExtraction(view);
+                    }
+
                     // 🔑 계정 주입 및 자동 로그인 실행
                     boolean isAlreadyLoggedInPage = url.contains("Mypage") || url.contains("MyMenu") || url.contains("mypage");
 
@@ -1431,6 +1437,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void executeSessionClear() {
         savedU2mId = ""; savedPhone = ""; savedMathflatPw = ""; savedStudentPhone = "";
+        // 사용자/세션을 정리할 때 이전 학생의 보고서 캐시도 함께 삭제한다.
+        getSharedPreferences("kst_u2m_report", MODE_PRIVATE).edit().clear().apply();
         try {
             CookieManager cookieManager = CookieManager.getInstance();
             cookieManager.removeAllCookies(value -> { if (value) cookieManager.flush(); });
@@ -1503,6 +1511,49 @@ public class MainActivity extends AppCompatActivity {
                 "    }" +
                 "})()";
         view.evaluateJavascript(jsCode, null);
+    }
+
+    // 📊 로그인된 유투엠 보고서 목록 DOM에서 표시 중인 데이터만 추출한다.
+    // 원본 HTML, 비밀번호, 쿠키는 저장하지 않는다.
+    private void injectU2MReportExtraction(WebView view) {
+        String js = "(function() {" +
+                "try {" +
+                "  if (window.__kstU2mReportExtractionStarted) return;" +
+                "  window.__kstU2mReportExtractionStarted = true;" +
+                "  var cards = Array.prototype.slice.call(document.querySelectorAll('.card_wrap'));" +
+                "  function text(root, selector) {" +
+                "    var el = root.querySelector(selector);" +
+                "    return el ? (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim() : null;" +
+                "  }" +
+                "  function percent(value) {" +
+                "    if (value == null) return null;" +
+                "    var match = String(value).replace(',', '.').match(/-?\\d+(?:\\.\\d+)?/);" +
+                "    if (!match) return null;" +
+                "    var n = Number(match[0]);" +
+                "    return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;" +
+                "  }" +
+                "  var reports = cards.map(function(card) {" +
+                "    return {" +
+                "      courseName: text(card, '.card_tit .tit') || text(card, '.tit')," +
+                "      period: text(card, '.sep')," +
+                "      achievement: percent(text(card, '.achv_level .num'))," +
+                "      completion: percent(text(card, '.com_level .num'))" +
+                "    };" +
+                "  }).filter(function(item) { return item.courseName || item.period || item.achievement !== null || item.completion !== null; });" +
+                "  var result = {" +
+                "    status: reports.length ? 'ok' : (cards.length ? 'structure_changed' : 'empty')," +
+                "    reports: reports," +
+                "    source: location.pathname + location.search," +
+                "    fetchedAt: new Date().toISOString()" +
+                "  };" +
+                "  if (window.AndroidApp && typeof window.AndroidApp.saveU2MReportData === 'function') {" +
+                "    window.AndroidApp.saveU2MReportData(JSON.stringify(result));" +
+                "  }" +
+                "} catch (e) {" +
+                "  try { if (window.AndroidApp) window.AndroidApp.saveU2MReportData(JSON.stringify({status:'error',reports:[],message:String(e)})); } catch (_) {}" +
+                "}" +
+                "})();";
+        view.evaluateJavascript(js, null);
     }
 
     // 🔑 매스플랫(Mathflat) 자동 로그인 JS 코드 주입
@@ -1610,6 +1661,46 @@ public class MainActivity extends AppCompatActivity {
         }
         @JavascriptInterface
         public void logoutAll() { executeSessionClear(); }
+
+        // 유투엠 보고서 페이지에서 추출한 최소 데이터만 앱 내부에 보관한다.
+        // 현재 URL을 확인해 유투엠 보고서 페이지 외의 출처에서 저장하지 못하게 한다.
+        @JavascriptInterface
+        public void saveU2MReportData(String json) {
+            String currentUrl = webView != null ? webView.getUrl() : null;
+            if (currentUrl == null || !currentUrl.startsWith("https://study.u2math.co.kr/Report/List")) return;
+            try {
+                org.json.JSONObject payload = new org.json.JSONObject(json == null ? "{}" : json);
+                String status = payload.optString("status");
+                if (!"ok".equals(status) && !"empty".equals(status) && !"structure_changed".equals(status)) return;
+                org.json.JSONArray reports = payload.optJSONArray("reports");
+                if ("ok".equals(status) && (reports == null || reports.length() == 0)) return;
+                getSharedPreferences("kst_u2m_report", MODE_PRIVATE)
+                        .edit()
+                        .putString("reports_json", payload.toString())
+                        .putLong("saved_at", System.currentTimeMillis())
+                        .apply();
+                if ("ok".equals(status)) {
+                    final int reportCount = reports.length();
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                            "유투엠 보고서 " + reportCount + "건을 불러왔어요.",
+                            Toast.LENGTH_SHORT).show());
+                }
+            } catch (Exception ignored) {
+                // 잘못된 DOM/JSON은 저장하지 않는다.
+            }
+        }
+
+        // KST HUB 화면에서만 캐시된 보고서를 읽을 수 있게 한다.
+        @JavascriptInterface
+        public String getU2MReportData() {
+            String currentUrl = webView != null ? webView.getUrl() : null;
+            if (currentUrl == null || !currentUrl.startsWith("https://u2mkst.github.io/home")) {
+                return "{\"status\":\"forbidden\",\"reports\":[]}";
+            }
+            String cached = getSharedPreferences("kst_u2m_report", MODE_PRIVATE)
+                    .getString("reports_json", null);
+            return cached != null ? cached : "{\"status\":\"empty\",\"reports\":[]}";
+        }
 
         @JavascriptInterface
         public void reportScrollTop(boolean atTop) {
