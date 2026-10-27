@@ -40,6 +40,12 @@ android {
     }
 
     buildTypes {
+        // 테스트용 APK는 기존 KST 앱과 별도로 설치되도록 패키지명을 분리한다.
+        debug {
+            applicationIdSuffix = ".u2mtest"
+            versionNameSuffix = "-u2mtest"
+        }
+
         release {
             // 💡 웹뷰 앱은 찌꺼기 코드가 없어 true로 두면 알아서 엄청나게 가벼워집니다!
             isMinifyEnabled = true
