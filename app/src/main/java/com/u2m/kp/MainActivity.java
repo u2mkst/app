@@ -1691,11 +1691,11 @@ public class MainActivity extends AppCompatActivity {
         public String getU2MReportData() {
             String currentUrl = webView != null ? webView.getUrl() : null;
             if (currentUrl == null || !currentUrl.startsWith("https://u2mkst.github.io/home")) {
-                return "{\\"status\\":\\"forbidden\\",\\"reports\\":[]}";
+                return new org.json.JSONObject().put("status", "forbidden").put("reports", new org.json.JSONArray()).toString();
             }
             String cached = getSharedPreferences("kst_u2m_report", MODE_PRIVATE)
                     .getString("reports_json", null);
-            return cached != null ? cached : "{\\"status\\":\\"empty\\",\\"reports\\":[]}";
+            return cached != null ? cached : new org.json.JSONObject().put("status", "empty").put("reports", new org.json.JSONArray()).toString();
         }
 
         @JavascriptInterface
