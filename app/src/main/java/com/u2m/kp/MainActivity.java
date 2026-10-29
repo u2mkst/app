@@ -33,6 +33,7 @@ import android.os.Process;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -111,15 +112,6 @@ public class MainActivity extends AppCompatActivity {
     private final Handler clockHandler = new Handler(Looper.getMainLooper());
     private Runnable clockRunnable;
 
-    // ⏱️ 오늘 공부(접속) 시간 — 상태 바 시계와 같은 1초 틱에 얹어서 올린다.
-    // 기기를 재시작해도 그날 누적 시간이 이어지도록 SharedPreferences에 주기적으로 저장하고,
-    // 날짜가 바뀌면(자정) 0부터 다시 센다.
-    private TextView tvStudyTime;
-    private static final String STUDY_PREFS = "study_timer";
-    private static final String STUDY_KEY_SECONDS = "seconds_today";
-    private static final String STUDY_KEY_DATE = "date";
-    private long studySecondsToday = 0;
-    private String studyDateKey = "";
 
     private final ActivityResultLauncher<String> bluetoothPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
@@ -237,18 +229,12 @@ public class MainActivity extends AppCompatActivity {
             ivQuit = findViewById(R.id.ivQuit);
             ivQrScan = findViewById(R.id.ivQrScan);
             ivBluetooth = findViewById(R.id.ivBluetooth);
-            tvStudyTime = findViewById(R.id.tvStudyTime);
 
             if (webView == null) {
                 throw new NullPointerException("❌ [XML 매칭 실패] activity_main.xml에 'webView' ID가 존재하지 않습니다.");
             }
 
-            // ⏱️ 오늘 공부(접속) 시간 — 기기를 재시작했어도 오늘 쌓인 만큼 이어서 보이도록
-            // 저장된 값을 먼저 불러온다. 날짜가 바뀌었으면(어제 값이 남아있으면) 0부터 시작.
-            loadStudyTimeForToday();
-
-            // 🕒 상단 상태 바 왼쪽 — 학원 이름 · 오늘 날짜(요일) · 시각을 한 줄로,
-            // 그 옆엔 오늘 공부(접속) 시간을 실시간(1초마다)으로 같이 갱신한다.
+            // 상단 상태 바의 날짜와 시각을 실시간으로 갱신한다.
             if (tvClock != null) {
                 clockRunnable = new Runnable() {
                     private final java.text.SimpleDateFormat dateFormat =
@@ -261,10 +247,6 @@ public class MainActivity extends AppCompatActivity {
                     public void run() {
                         java.util.Date now = new java.util.Date();
                         tvClock.setText("K&P · " + dateFormat.format(now) + " " + timeFormat.format(now));
-                        tickStudyTime();
-                        // 매초 쓰기는 배터리/플래시에 부담이라, 10초마다만 디스크에 저장한다
-                        // (재시작으로 최대 10초치 정도만 손실될 수 있음 — 실시간 표시엔 영향 없음).
-                        if (++tickCount % 10 == 0) persistStudyTime();
                         clockHandler.postDelayed(this, 1000);
                     }
                 };
@@ -368,6 +350,15 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 homeFloatingButton.setVisibility(View.GONE);
+                homeFloatingButton.setOnTouchListener((v, event) -> {
+                    if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                        v.animate().scaleX(0.94f).scaleY(0.94f).setDuration(90).start();
+                    } else if (event.getAction() == MotionEvent.ACTION_UP
+                            || event.getAction() == MotionEvent.ACTION_CANCEL) {
+                        v.animate().scaleX(1f).scaleY(1f).setDuration(140).start();
+                    }
+                    return false;
+                });
                 homeFloatingButton.setOnClickListener(v -> {
                     webView.loadUrl("https://u2mkst.github.io/home");
                 });
@@ -1026,49 +1017,6 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
-    // ⏱️ 오늘 공부(접속) 시간 ------------------------------------------------
-    private String todayDateKey() {
-        return new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(new java.util.Date());
-    }
-
-    private void loadStudyTimeForToday() {
-        studyDateKey = todayDateKey();
-        SharedPreferences prefs = getSharedPreferences(STUDY_PREFS, Context.MODE_PRIVATE);
-        String savedDate = prefs.getString(STUDY_KEY_DATE, "");
-        studySecondsToday = studyDateKey.equals(savedDate) ? prefs.getLong(STUDY_KEY_SECONDS, 0) : 0;
-        if (tvStudyTime != null) tvStudyTime.setText(formatStudyTime(studySecondsToday));
-    }
-
-    // 1초 틱마다 호출 — 날짜가 바뀌었으면(자정을 넘겼으면) 0부터 다시 센다.
-    private void tickStudyTime() {
-        if (tvStudyTime == null) return;
-        String nowKey = todayDateKey();
-        if (!nowKey.equals(studyDateKey)) {
-            studyDateKey = nowKey;
-            studySecondsToday = 0;
-        }
-        studySecondsToday++;
-        tvStudyTime.setText(formatStudyTime(studySecondsToday));
-    }
-
-    private void persistStudyTime() {
-        try {
-            getSharedPreferences(STUDY_PREFS, Context.MODE_PRIVATE).edit()
-                    .putString(STUDY_KEY_DATE, studyDateKey)
-                    .putLong(STUDY_KEY_SECONDS, studySecondsToday)
-                    .apply();
-        } catch (Exception e) {
-            Log.e(TAG, "공부 시간 저장 실패: " + e.getMessage());
-        }
-    }
-
-    private String formatStudyTime(long totalSeconds) {
-        long h = totalSeconds / 3600;
-        long m = (totalSeconds % 3600) / 60;
-        long s = totalSeconds % 60;
-        return String.format(java.util.Locale.getDefault(), "⏱ %d:%02d:%02d", h, m, s);
-    }
-
     // 🔋 상단 상태 바의 배터리 표시를 현재 잔량으로 초기화
     private void updateBatteryStatusText() {
         try {
@@ -1391,7 +1339,6 @@ public class MainActivity extends AppCompatActivity {
     protected void onPause() {
         super.onPause();
         Toast.makeText(this, "보안 규정상 캡처 및 화면 녹화를 할 수 없습니다.", Toast.LENGTH_SHORT).show();
-        persistStudyTime(); // 갑자기 종료돼도 지금까지 쌓인 공부 시간은 남도록
     }
 
     private void showEmergencyDiagnosticScreen(Exception e) {
@@ -1647,8 +1594,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        persistStudyTime();
-
         try {
             if (screenOffReceiver != null) unregisterReceiver(screenOffReceiver);
             if (headsetPlugReceiver != null) unregisterReceiver(headsetPlugReceiver);
