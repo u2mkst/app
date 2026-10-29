@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="kp_accent">#4C9AFF</color>
+    <color name="kp_accent_pressed">#2B7FE8</color>
+    <color name="kp_page_bg">#15171C</color>
+    <color name="kp_surface">#1E2126</color>
+    <color name="kp_surface_soft">#23262C</color>
+    <color name="kp_border">#2E3238</color>
+    <color name="kp_text">#F2F4F6</color>
+    <color name="kp_muted">#B0BAC5</color>
+    <color name="kp_icon">#C3CBD5</color>
+    <color name="kp_danger">#FF6B64</color>
+    <color name="kp_input">#23262C</color>
+</resources>
