@@ -1,12 +1,30 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
     <style name="Base.Theme.KP수학입시학원" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your dark theme here. -->
-        <!-- <item name="colorPrimary">@color/my_dark_primary</item> -->
+        <item name="colorPrimary">@color/kp_accent</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSecondary">@color/kp_accent</item>
+        <item name="colorSurface">@color/kp_surface</item>
+        <item name="colorOnSurface">@color/kp_text</item>
+        <item name="android:colorAccent">@color/kp_accent</item>
         <item name="android:fontFamily">@font/paperlogy_semibold</item>
         <item name="fontFamily">@font/paperlogy_semibold</item>
         <item name="textAppearanceHeadlineSmall">@style/TextAppearance.KP.HeadlineSmall</item>
         <item name="textAppearanceBodyMedium">@style/TextAppearance.KP.BodyMedium</item>
         <item name="textAppearanceLabelLarge">@style/TextAppearance.KP.LabelLarge</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">@color/kp_page_bg</item>
+    </style>
+    <style name="Theme.KP수학입시학원" parent="Base.Theme.KP수학입시학원" />
+    <style name="TextAppearance.KP.HeadlineSmall" parent="TextAppearance.Material3.HeadlineSmall">
+        <item name="android:fontFamily">@font/paperlogy_semibold</item>
+        <item name="fontFamily">@font/paperlogy_semibold</item>
+    </style>
+    <style name="TextAppearance.KP.BodyMedium" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:fontFamily">@font/paperlogy_semibold</item>
+        <item name="fontFamily">@font/paperlogy_semibold</item>
+    </style>
+    <style name="TextAppearance.KP.LabelLarge" parent="TextAppearance.Material3.LabelLarge">
+        <item name="android:fontFamily">@font/paperlogy_semibold</item>
+        <item name="fontFamily">@font/paperlogy_semibold</item>
     </style>
 </resources>

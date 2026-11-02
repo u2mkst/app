@@ -544,11 +544,12 @@ public class MainActivity extends AppCompatActivity {
         if (tab.tabView == null) return;
         float r = dp(10);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor(selected ? "#F2F4F6" : "#2B313D"));
+        // 선택된 탭은 아래 툴바와 같은 면 색, 나머지는 탭 줄 배경에 녹아들게 한다 (라이트/다크 자동 대응).
+        bg.setColor(selected ? ContextCompat.getColor(this, R.color.kp_surface) : Color.TRANSPARENT);
         bg.setCornerRadii(new float[]{r, r, r, r, 0, 0, 0, 0});
         tab.tabView.setBackground(bg);
-        tab.titleView.setTextColor(Color.parseColor(selected ? "#191F28" : "#B7C0CC"));
-        tab.closeView.setColorFilter(Color.parseColor(selected ? "#3C4350" : "#B7C0CC"));
+        tab.titleView.setTextColor(ContextCompat.getColor(this, selected ? R.color.kp_text : R.color.kp_muted));
+        tab.closeView.setColorFilter(ContextCompat.getColor(this, R.color.kp_icon));
     }
 
     private void updateTabTitle(BrowserTab tab) {

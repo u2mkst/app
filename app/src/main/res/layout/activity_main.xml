@@ -6,7 +6,7 @@
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#FFFFFF"
+    android:background="@color/kp_page_bg"
     tools:context=".MainActivity">
 
     <LinearLayout
@@ -19,7 +19,7 @@
             android:id="@+id/tabBar"
             android:layout_width="match_parent"
             android:layout_height="40dp"
-            android:background="#1B1F27"
+            android:background="@color/kp_border"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingStart="6dp"
@@ -50,7 +50,7 @@
                 android:focusable="true"
                 android:padding="9dp"
                 android:src="@drawable/ic_add"
-                app:tint="#B7C0CC" />
+                app:tint="@color/kp_icon" />
 
             <TextView
                 android:id="@+id/tvClock"
@@ -59,7 +59,7 @@
                 android:layout_marginStart="8dp"
                 android:includeFontPadding="false"
                 android:text="00:00"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/kp_text"
                 android:textSize="11sp"
                 android:textStyle="bold" />
 
@@ -75,7 +75,7 @@
                 android:paddingEnd="8dp"
                 android:scaleType="fitCenter"
                 android:src="@drawable/ic_network_connected"
-                app:tint="#FFFFFF" />
+                app:tint="@color/kp_icon" />
 
             <ImageView
                 android:id="@+id/ivBattery"
@@ -85,7 +85,7 @@
                 android:contentDescription="배터리 상태"
                 android:scaleType="fitCenter"
                 android:src="@drawable/ic_battery"
-                app:tint="#FFFFFF" />
+                app:tint="@color/kp_icon" />
 
             <TextView
                 android:id="@+id/tvBattery"
@@ -94,7 +94,7 @@
                 android:layout_marginStart="3dp"
                 android:includeFontPadding="false"
                 android:text="100%"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/kp_muted"
                 android:textSize="11sp" />
 
             <ImageView
@@ -109,7 +109,8 @@
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
                 android:scaleType="fitCenter"
-                android:src="@drawable/ic_qr_scan" />
+                android:src="@drawable/ic_qr_scan"
+                app:tint="@color/kp_icon" />
 
             <ImageView
                 android:id="@+id/ivBluetooth"
@@ -122,7 +123,8 @@
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
                 android:scaleType="fitCenter"
-                android:src="@drawable/ic_bluetooth" />
+                android:src="@drawable/ic_bluetooth"
+                app:tint="@color/kp_icon" />
 
             <ImageView
                 android:id="@+id/ivQuit"
@@ -135,7 +137,8 @@
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
                 android:scaleType="fitCenter"
-                android:src="@drawable/ic_quit" />
+                android:src="@drawable/ic_quit"
+                app:tint="@color/kp_danger" />
         </LinearLayout>
 
         <!-- 🧭 툴바 (뒤로 / 앞으로 / 새로고침 / 시작 페이지 / 주소창) -->
@@ -143,7 +146,7 @@
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="46dp"
-            android:background="#F2F4F6"
+            android:background="@color/kp_surface"
             android:focusable="true"
             android:focusableInTouchMode="true"
             android:gravity="center_vertical"
@@ -161,7 +164,7 @@
                 android:focusable="true"
                 android:padding="9dp"
                 android:src="@drawable/ic_arrow_back"
-                app:tint="#3C4350" />
+                app:tint="@color/kp_icon" />
 
             <ImageView
                 android:id="@+id/ivForward"
@@ -173,7 +176,7 @@
                 android:focusable="true"
                 android:padding="9dp"
                 android:src="@drawable/ic_arrow_forward"
-                app:tint="#3C4350" />
+                app:tint="@color/kp_icon" />
 
             <ImageView
                 android:id="@+id/ivReload"
@@ -185,7 +188,7 @@
                 android:focusable="true"
                 android:padding="9dp"
                 android:src="@drawable/ic_refresh"
-                app:tint="#3C4350" />
+                app:tint="@color/kp_icon" />
 
             <ImageView
                 android:id="@+id/ivHome"
@@ -197,7 +200,7 @@
                 android:focusable="true"
                 android:padding="9dp"
                 android:src="@drawable/ic_home"
-                app:tint="#3C4350" />
+                app:tint="@color/kp_icon" />
 
             <EditText
                 android:id="@+id/etAddress"
@@ -217,8 +220,8 @@
                 android:paddingBottom="0dp"
                 android:selectAllOnFocus="true"
                 android:singleLine="true"
-                android:textColor="#191F28"
-                android:textColorHint="#8B95A1"
+                android:textColor="@color/kp_text"
+                android:textColorHint="@color/kp_muted"
                 android:textSize="13sp" />
         </LinearLayout>
 
@@ -229,7 +232,7 @@
             android:layout_width="match_parent"
             android:layout_height="2dp"
             android:max="100"
-            android:progressTint="#004BBF"
+            android:progressTint="@color/kp_accent"
             android:visibility="gone" />
 
         <!-- 🔄 당겨서 새로고침 + 탭별 웹뷰가 들어가는 영역 -->
