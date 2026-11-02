@@ -1,0 +1,43 @@
+name: Android Test Build (debug APK)
+
+# 기능 브랜치 테스트용: 디버그 서명 APK를 만들어 Actions 화면에서 내려받게만 한다.
+# 비밀키/릴리스/u2mkst/home 의 kst.apk 는 전혀 건드리지 않는다.
+on:
+  push:
+    branches: [feature/browser-ui]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Unit tests + debug APK
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kst-browser-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
