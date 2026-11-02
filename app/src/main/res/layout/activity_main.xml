@@ -14,44 +14,54 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <!-- 📶 얇은 상단 상태 바 (시각 / 배터리 / 네트워크) -->
+        <!-- 🗂️ 탭 줄 + 상태 표시 (시각 / 네트워크 / 배터리 / QR / 블루투스 / 종료) -->
         <LinearLayout
-            android:id="@+id/topStatusBar"
+            android:id="@+id/tabBar"
             android:layout_width="match_parent"
-            android:layout_height="22dp"
-            android:orientation="horizontal"
+            android:layout_height="40dp"
+            android:background="#1B1F27"
             android:gravity="center_vertical"
-            android:background="#000000"
-            android:paddingStart="12dp"
+            android:orientation="horizontal"
+            android:paddingStart="6dp"
             android:paddingEnd="4dp">
+
+            <HorizontalScrollView
+                android:id="@+id/tabScroll"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:overScrollMode="never"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/tabContainer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
+
+            <ImageView
+                android:id="@+id/ivNewTab"
+                android:layout_width="36dp"
+                android:layout_height="match_parent"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:contentDescription="새 탭"
+                android:focusable="true"
+                android:padding="9dp"
+                android:src="@drawable/ic_add"
+                app:tint="#B7C0CC" />
 
             <TextView
                 android:id="@+id/tvClock"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
                 android:includeFontPadding="false"
-                android:text="K&amp;P · 00:00"
+                android:text="00:00"
                 android:textColor="#FFFFFF"
                 android:textSize="11sp"
                 android:textStyle="bold" />
-
-            <!-- ⏱️ 오늘 공부(접속) 시간 — 1초마다 실제로 올라가는 실시간 타이머.
-                 자정이 지나면 0부터 다시 센다. -->
-            <TextView
-                android:id="@+id/tvStudyTime"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="10dp"
-                android:includeFontPadding="false"
-                android:text="⏱ 0:00:00"
-                android:textColor="#7ED9A8"
-                android:textSize="11sp"
-                android:textStyle="bold" />
-
-            <View
-                android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
 
             <ImageView
                 android:id="@+id/ivNetworkStatus"
@@ -59,22 +69,22 @@
                 android:layout_height="match_parent"
                 android:background="?attr/selectableItemBackground"
                 android:clickable="true"
+                android:contentDescription="네트워크 상태 (탭하여 상세 정보 보기)"
                 android:focusable="true"
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
-                android:src="@drawable/ic_network_connected"
                 android:scaleType="fitCenter"
-                android:contentDescription="네트워크 상태 (탭하여 상세 정보 보기)"
+                android:src="@drawable/ic_network_connected"
                 app:tint="#FFFFFF" />
 
             <ImageView
                 android:id="@+id/ivBattery"
                 android:layout_width="16dp"
                 android:layout_height="16dp"
-                android:layout_marginStart="6dp"
-                android:src="@drawable/ic_battery"
-                android:scaleType="fitCenter"
+                android:layout_marginStart="2dp"
                 android:contentDescription="배터리 상태"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_battery"
                 app:tint="#FFFFFF" />
 
             <TextView
@@ -91,76 +101,151 @@
                 android:id="@+id/ivQrScan"
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
-                android:layout_marginStart="10dp"
+                android:layout_marginStart="6dp"
                 android:background="?attr/selectableItemBackground"
                 android:clickable="true"
+                android:contentDescription="QR 코드 스캔"
                 android:focusable="true"
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
-                android:src="@drawable/ic_qr_scan"
                 android:scaleType="fitCenter"
-                android:contentDescription="QR 코드 스캔" />
+                android:src="@drawable/ic_qr_scan" />
 
             <ImageView
                 android:id="@+id/ivBluetooth"
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
-                android:layout_marginStart="10dp"
                 android:background="?attr/selectableItemBackground"
                 android:clickable="true"
+                android:contentDescription="블루투스 상태"
                 android:focusable="true"
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
-                android:src="@drawable/ic_bluetooth"
                 android:scaleType="fitCenter"
-                android:contentDescription="블루투스 상태" />
+                android:src="@drawable/ic_bluetooth" />
 
             <ImageView
                 android:id="@+id/ivQuit"
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
-                android:layout_marginStart="10dp"
                 android:background="?attr/selectableItemBackground"
                 android:clickable="true"
+                android:contentDescription="앱 종료"
                 android:focusable="true"
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
-                android:src="@drawable/ic_quit"
                 android:scaleType="fitCenter"
-                android:contentDescription="앱 종료" />
-
+                android:src="@drawable/ic_quit" />
         </LinearLayout>
 
-        <!-- 🔄 당겨서 새로고침 레이아웃 (SwipeRefreshLayout) -->
+        <!-- 🧭 툴바 (뒤로 / 앞으로 / 새로고침 / 시작 페이지 / 주소창) -->
+        <LinearLayout
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:background="#F2F4F6"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="6dp"
+            android:paddingEnd="10dp">
+
+            <ImageView
+                android:id="@+id/ivBack"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:contentDescription="뒤로"
+                android:focusable="true"
+                android:padding="9dp"
+                android:src="@drawable/ic_arrow_back"
+                app:tint="#3C4350" />
+
+            <ImageView
+                android:id="@+id/ivForward"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:contentDescription="앞으로"
+                android:focusable="true"
+                android:padding="9dp"
+                android:src="@drawable/ic_arrow_forward"
+                app:tint="#3C4350" />
+
+            <ImageView
+                android:id="@+id/ivReload"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:contentDescription="새로고침"
+                android:focusable="true"
+                android:padding="9dp"
+                android:src="@drawable/ic_refresh"
+                app:tint="#3C4350" />
+
+            <ImageView
+                android:id="@+id/ivHome"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:contentDescription="시작 페이지"
+                android:focusable="true"
+                android:padding="9dp"
+                android:src="@drawable/ic_home"
+                app:tint="#3C4350" />
+
+            <EditText
+                android:id="@+id/etAddress"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_address_bar"
+                android:hint="주소 입력 (선생님이 허용한 사이트만 열려요)"
+                android:imeOptions="actionGo|flagNoExtractUi"
+                android:importantForAutofill="no"
+                android:inputType="textUri"
+                android:maxLines="1"
+                android:paddingStart="16dp"
+                android:paddingTop="0dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="0dp"
+                android:selectAllOnFocus="true"
+                android:singleLine="true"
+                android:textColor="#191F28"
+                android:textColorHint="#8B95A1"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- ⏳ 페이지 로딩 진행 막대 -->
+        <ProgressBar
+            android:id="@+id/pbLoading"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="2dp"
+            android:max="100"
+            android:progressTint="#004BBF"
+            android:visibility="gone" />
+
+        <!-- 🔄 당겨서 새로고침 + 탭별 웹뷰가 들어가는 영역 -->
         <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
             android:id="@+id/swipeRefreshLayout"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1">
 
-            <android.webkit.WebView
-                android:id="@+id/webView"
+            <FrameLayout
+                android:id="@+id/webContainer"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
 
         </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
     </LinearLayout>
-
-    <!-- 🏠 홈 플로팅 버튼 -->
-    <Button
-        android:id="@+id/btnHome"
-        android:layout_width="60dp"
-        android:layout_height="60dp"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="24dp"
-        android:text=""
-        android:contentDescription="홈으로 가기"
-        android:gravity="center"
-        android:padding="0dp"
-        android:includeFontPadding="false"
-        android:background="@drawable/bg_home_button"
-        app:backgroundTint="@null"
-        android:elevation="10dp" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

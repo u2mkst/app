@@ -8,14 +8,12 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.Drawable;
-import android.graphics.drawable.LayerDrawable;
+import android.graphics.drawable.GradientDrawable;
 import android.media.AudioManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -31,16 +29,24 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
 import android.provider.Settings;
+import android.text.Html;
+import android.text.TextUtils;
 import android.util.Log;
+import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.ConsoleMessage;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.SslErrorHandler;
+import android.webkit.WebBackForwardList;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -50,8 +56,11 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -62,11 +71,11 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
-import androidx.core.graphics.drawable.DrawableCompat;
 
 import com.journeyapps.barcodescanner.ScanContract;
 import com.journeyapps.barcodescanner.ScanOptions;
 
+import java.util.ArrayList;
 import java.util.List;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
@@ -96,11 +105,33 @@ public class MainActivity extends AppCompatActivity {
         return sha256(input).equals(ADMIN_PASSWORD_HASH);
     }
 
-    private WebView webView;
-    private SwipeRefreshLayout swipeRefreshLayout;
-    private Button homeFloatingButton;
+    // 🌐 브라우저 — 새 탭을 열면 보이는 시작 페이지(우리 사이트가 제공: 로그인 배너 + 바로가기 타일)
+    private static final String START_URL = "https://u2mkst.github.io/home/start.html";
+    // 태블릿 메모리를 생각해서 동시에 열 수 있는 탭 수를 제한한다.
+    private static final int MAX_TABS = 6;
 
-    // 📶 얇은 상단 상태 바 (시각 / 배터리 / 네트워크 / 종료)
+    // 어떤 사이트를 열 수 있는지 판정 (허용 목록은 2단계에서 서버 설정으로 갱신)
+    private final SiteAccessPolicy sitePolicy = new SiteAccessPolicy();
+    private final List<BrowserTab> tabs = new ArrayList<>();
+    private BrowserTab currentTab;
+    // 우리 사이트에만 열어주는 앱 연동 브릿지(로그인 정보 전달 등)와, 모든 사이트에 열어주는 이어폰 확인 전용 브릿지
+    private final AndroidBridge androidBridge = new AndroidBridge();
+    private final KpGuard kpGuard = new KpGuard();
+
+    private SwipeRefreshLayout swipeRefreshLayout;
+    private FrameLayout webContainer;
+    private LinearLayout tabContainer;
+    private HorizontalScrollView tabScroll;
+    private View toolbarView;
+    private EditText etAddress;
+    private ImageView ivBack;
+    private ImageView ivForward;
+    private ImageView ivReload;
+    private ImageView ivHome;
+    private ImageView ivNewTab;
+    private ProgressBar pbLoading;
+
+    // 📶 상단 상태 표시 (시각 / 배터리 / 네트워크 / 종료)
     private TextView tvClock;
     private TextView tvBattery;
     private ImageView ivBattery;
@@ -111,16 +142,6 @@ public class MainActivity extends AppCompatActivity {
     private final Handler clockHandler = new Handler(Looper.getMainLooper());
     private Runnable clockRunnable;
 
-    // ⏱️ 오늘 공부(접속) 시간 — 상태 바 시계와 같은 1초 틱에 얹어서 올린다.
-    // 기기를 재시작해도 그날 누적 시간이 이어지도록 SharedPreferences에 주기적으로 저장하고,
-    // 날짜가 바뀌면(자정) 0부터 다시 센다.
-    private TextView tvStudyTime;
-    private static final String STUDY_PREFS = "study_timer";
-    private static final String STUDY_KEY_SECONDS = "seconds_today";
-    private static final String STUDY_KEY_DATE = "date";
-    private long studySecondsToday = 0;
-    private String studyDateKey = "";
-
     private final ActivityResultLauncher<String> bluetoothPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {
                 if (granted) {
@@ -130,22 +151,26 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
-    // 🐶 워치독 — 페이지의 JS가 하트비트를 못 보낼 만큼 오래 멈춰있으면(먹통) 자동으로
-    // WebView를 새로고침한다. 값은 index.html에서 evaluateJavascript로 주입한
-    // setInterval 하트비트가 AndroidBridge.reportHeartbeat()를 부를 때마다 갱신된다.
+    // 🐶 워치독 — 우리 사이트를 보는 중에 페이지의 JS가 하트비트를 못 보낼 만큼 오래 멈춰있으면(먹통)
+    // 자동으로 새로고침한다. 하트비트는 앱 브릿지가 열린 우리 사이트만 보낼 수 있으므로, 다른
+    // 사이트를 보는 동안에는 먹통 판정을 하지 않는다.
     private static final long WATCHDOG_TIMEOUT_MS = 5 * 60 * 1000;
     private static final long WATCHDOG_CHECK_INTERVAL_MS = 60 * 1000;
     private volatile long lastHeartbeatAt = System.currentTimeMillis();
     private Long lastRendererCrashAt = null;
-    private boolean hasLoadedContentOnce = false;
     private final Handler watchdogHandler = new Handler(Looper.getMainLooper());
     private final Runnable watchdogRunnable = new Runnable() {
         @Override
         public void run() {
-            if (System.currentTimeMillis() - lastHeartbeatAt > WATCHDOG_TIMEOUT_MS) {
-                Log.e(TAG, "🐶 워치독: " + (WATCHDOG_TIMEOUT_MS / 60000) + "분간 응답 없음 — WebView를 새로고침합니다.");
+            BrowserTab tab = currentTab;
+            boolean heartbeatExpected = tab != null && !tab.showingNetworkError && !tab.blocked
+                    && SiteAccessPolicy.isCoreSite(tab.url);
+            if (!heartbeatExpected) {
+                lastHeartbeatAt = System.currentTimeMillis();
+            } else if (System.currentTimeMillis() - lastHeartbeatAt > WATCHDOG_TIMEOUT_MS) {
+                Log.e(TAG, "🐶 워치독: " + (WATCHDOG_TIMEOUT_MS / 60000) + "분간 응답 없음 — 현재 탭을 새로고침합니다.");
                 lastHeartbeatAt = System.currentTimeMillis(); // 재시도 직후 곧바로 다시 발동하는 것 방지
-                if (webView != null) webView.reload();
+                tab.webView.reload();
             }
             // 📶 Wi-Fi 신호 세기는 연결/해제 이벤트 없이도 계속 바뀌므로, 같은 주기로 같이 갱신한다.
             updateNetworkStatusIcon();
@@ -188,8 +213,6 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean isPendingScreenOffLogout = false;
     private boolean isLowBatteryWarned = false;
-    private boolean isHomeButtonHidden = false; // 길게 눌러 숨김 — 새로고침 전까지 유지
-    private boolean isShowingNetworkErrorPage = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -217,7 +240,7 @@ public class MainActivity extends AppCompatActivity {
             if (getWindow() != null && getWindow().getDecorView() != null) {
                 getWindow().getDecorView().post(() -> hideSystemUI());
 
-                // 🩹 [수정] 입력창을 탭해서 키보드가 뜨는 것처럼, 창 포커스는 그대로 유지된 채
+                // 🩹 입력창을 탭해서 키보드가 뜨는 것처럼, 창 포커스는 그대로 유지된 채
                 // 시스템 바만 다시 나타나는 경우가 있어 onWindowFocusChanged만으로는 못 잡는다.
                 // 시스템 바 표시 상태가 바뀔 때마다(원인 불문) 곧바로 다시 숨긴다.
                 getWindow().getDecorView().setOnSystemUiVisibilityChangeListener(visibility -> {
@@ -227,9 +250,18 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
 
-            webView = findViewById(R.id.webView);
             swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
-            homeFloatingButton = findViewById(R.id.btnHome);
+            webContainer = findViewById(R.id.webContainer);
+            tabContainer = findViewById(R.id.tabContainer);
+            tabScroll = findViewById(R.id.tabScroll);
+            toolbarView = findViewById(R.id.toolbar);
+            etAddress = findViewById(R.id.etAddress);
+            ivBack = findViewById(R.id.ivBack);
+            ivForward = findViewById(R.id.ivForward);
+            ivReload = findViewById(R.id.ivReload);
+            ivHome = findViewById(R.id.ivHome);
+            ivNewTab = findViewById(R.id.ivNewTab);
+            pbLoading = findViewById(R.id.pbLoading);
             tvClock = findViewById(R.id.tvClock);
             tvBattery = findViewById(R.id.tvBattery);
             ivBattery = findViewById(R.id.ivBattery);
@@ -237,35 +269,21 @@ public class MainActivity extends AppCompatActivity {
             ivQuit = findViewById(R.id.ivQuit);
             ivQrScan = findViewById(R.id.ivQrScan);
             ivBluetooth = findViewById(R.id.ivBluetooth);
-            tvStudyTime = findViewById(R.id.tvStudyTime);
 
-            if (webView == null) {
-                throw new NullPointerException("❌ [XML 매칭 실패] activity_main.xml에 'webView' ID가 존재하지 않습니다.");
+            if (webContainer == null || tabContainer == null || etAddress == null) {
+                throw new NullPointerException("❌ [XML 매칭 실패] activity_main.xml에 webContainer/tabContainer/etAddress ID가 존재하지 않습니다.");
             }
 
-            // ⏱️ 오늘 공부(접속) 시간 — 기기를 재시작했어도 오늘 쌓인 만큼 이어서 보이도록
-            // 저장된 값을 먼저 불러온다. 날짜가 바뀌었으면(어제 값이 남아있으면) 0부터 시작.
-            loadStudyTimeForToday();
-
-            // 🕒 상단 상태 바 왼쪽 — 학원 이름 · 오늘 날짜(요일) · 시각을 한 줄로,
-            // 그 옆엔 오늘 공부(접속) 시간을 실시간(1초마다)으로 같이 갱신한다.
+            // 🕒 상단 오른쪽 — 오늘 날짜(요일)와 시각. 분 단위로만 보여주므로 15초마다 갱신하면 충분하다.
             if (tvClock != null) {
                 clockRunnable = new Runnable() {
-                    private final java.text.SimpleDateFormat dateFormat =
-                            new java.text.SimpleDateFormat("M/d(E)", java.util.Locale.KOREAN);
-                    private final java.text.SimpleDateFormat timeFormat =
-                            new java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault());
-                    private int tickCount = 0;
+                    private final java.text.SimpleDateFormat format =
+                            new java.text.SimpleDateFormat("M/d(E) HH:mm", java.util.Locale.KOREAN);
 
                     @Override
                     public void run() {
-                        java.util.Date now = new java.util.Date();
-                        tvClock.setText("K&P · " + dateFormat.format(now) + " " + timeFormat.format(now));
-                        tickStudyTime();
-                        // 매초 쓰기는 배터리/플래시에 부담이라, 10초마다만 디스크에 저장한다
-                        // (재시작으로 최대 10초치 정도만 손실될 수 있음 — 실시간 표시엔 영향 없음).
-                        if (++tickCount % 10 == 0) persistStudyTime();
-                        clockHandler.postDelayed(this, 1000);
+                        tvClock.setText(format.format(new java.util.Date()));
+                        clockHandler.postDelayed(this, 15000);
                     }
                 };
                 clockHandler.post(clockRunnable);
@@ -316,306 +334,25 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
 
-            // 🔄 당겨서 새로고침 리스너
-            // WebView는 NestedScrollingChild를 구현하지 않아 SwipeRefreshLayout이 제스처를
-            // 가로챌지 판단할 때 getScrollY() 값이 터치 이벤트와 정확히 동기화되지 않는
-            // 경우가 있다 — 이 때문에 맨 위가 아닌 곳에서 위로 스크롤(아래로 쓸어내리는
-            // 제스처)해도 새로고침이 발동하는 문제가 생긴다. canScrollVertically(-1)로
-            // 판단을 대체하고, 스크롤 위치에 따라 아예 제스처 자체를 껐다 켰다 해서
-            // 스크롤 맨 위에서만 당겨서 새로고침이 가능하도록 이중으로 막는다.
-            if (swipeRefreshLayout != null) {
-                swipeRefreshLayout.setOnRefreshListener(() -> {
-                    if (webView != null) {
-                        isHomeButtonHidden = false;
-                        webView.reload();
-                    }
-                });
-                swipeRefreshLayout.setOnChildScrollUpCallback((parent, child) -> webView.canScrollVertically(-1));
+            setupSwipeRefresh();
+            setupToolbar();
 
-                if (webView != null) {
-                    webView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) ->
-                            swipeRefreshLayout.setEnabled(scrollY == 0));
-                }
-            }
-
-            // 🏠 플로팅 홈 버튼 클릭 시 세션 유지 이동
-            if (homeFloatingButton != null) {
-                homeFloatingButton.setText("");
-                homeFloatingButton.setGravity(Gravity.CENTER);
-
-                Drawable buttonBg = ContextCompat.getDrawable(this, R.drawable.bg_home_button);
-                Drawable homeIcon = ContextCompat.getDrawable(this, R.drawable.ic_home);
-
-                if (buttonBg != null && homeIcon != null) {
-                    DrawableCompat.setTint(homeIcon, Color.WHITE);
-                    Drawable[] layers = new Drawable[]{buttonBg, homeIcon};
-                    LayerDrawable layerDrawable = new LayerDrawable(layers);
-
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        layerDrawable.setLayerGravity(1, Gravity.CENTER);
-                    } else {
-                        layerDrawable.setLayerInset(1, 0, 0, 0, 0);
-                    }
-
-                    homeFloatingButton.setBackground(layerDrawable);
-                    homeFloatingButton.setCompoundDrawablesWithIntrinsicBounds(null, null, null, null);
-
-                    // 🌟 기본 검은 그림자 대신 버튼 색과 어울리는 파란빛 그림자
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                        homeFloatingButton.setOutlineAmbientShadowColor(Color.parseColor("#004BBF"));
-                        homeFloatingButton.setOutlineSpotShadowColor(Color.parseColor("#004BBF"));
-                    }
-                }
-
-                homeFloatingButton.setVisibility(View.GONE);
-                homeFloatingButton.setOnClickListener(v -> {
-                    webView.loadUrl("https://u2mkst.github.io/home");
-                });
-
-                // 🙈 길게 누르면 숨김 — 새로고침(당겨서 새로고침 / 네트워크 재연결 자동 새로고침)
-                // 전까지는 계속 숨겨져 있는다.
-                homeFloatingButton.setOnLongClickListener(v -> {
-                    isHomeButtonHidden = true;
-                    homeFloatingButton.setVisibility(View.GONE);
-                    Toast.makeText(this, "홈 버튼을 숨겼습니다. 새로고침하면 다시 나타납니다.", Toast.LENGTH_SHORT).show();
-                    return true;
-                });
-            }
-
-            // 🌐 웹뷰 고급 환경 설정
-            WebSettings webSettings = webView.getSettings();
-            webSettings.setJavaScriptEnabled(true);
-            webSettings.setDomStorageEnabled(true);
-            webSettings.setUseWideViewPort(true);
-            webSettings.setLoadWithOverviewMode(true);
-            webSettings.setJavaScriptCanOpenWindowsAutomatically(true);
-            webSettings.setDatabaseEnabled(true);
-            webSettings.setCacheMode(WebSettings.LOAD_DEFAULT);
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-            }
-
-            // 🍪 쿠키 허용 설정 (로그인 세션 유지)
-            CookieManager cookieManager = CookieManager.getInstance();
-            cookieManager.setAcceptCookie(true);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                cookieManager.setAcceptThirdPartyCookies(webView, true);
-            }
-
-            // 구글이 "; wv" 토큰으로 임베디드 웹뷰를 감지해 reCAPTCHA/로그인 등을 차단하므로
-            // 커스텀 문자열은 덧붙이지 않고 표준 크롬 브라우저처럼 보이도록 wv 토큰만 제거한다.
-            String defaultUserAgent = webSettings.getUserAgentString();
-            webSettings.setUserAgentString(defaultUserAgent.replace("; wv", ""));
-
-            webView.setWebChromeClient(new WebChromeClient() {
-                @Override
-                public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
-                    Log.d(TAG, "[WebConsole] " + consoleMessage.message());
-                    return true;
-                }
-            });
-
-            webView.setWebViewClient(new WebViewClient() {
-                @Override
-                public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                    String url = request.getUrl().toString();
-
-                    // 🔒 [추가] 외부 시스템 설정 진입 및 외부 패키지 차단
-                    if (url.startsWith("intent:") || url.startsWith("android-app:")) {
-                        if (url.contains("com.android.settings")) {
-                            Toast.makeText(MainActivity.this, "🔒 시스템 설정 진입이 제한되어 있습니다.", Toast.LENGTH_SHORT).show();
-                            return true;
-                        }
-                    }
-
-                    if (url.contains("swgwanggyo.u2math.co.kr/Main/Iu2mfc")) {
-                        view.loadUrl("https://swgwanggyo.u2math.co.kr/Mypage/MyMenu/");
-                        return true;
-                    }
-
-                    // 🔒 유투엠은 로그인 직후 학원 전용 서브도메인으로 "http://" 주소를 내려준다
-                    // (예: http://swgwanggyo.u2math.co.kr/Login/Go?info=...). 이 앱은
-                    // usesCleartextTraffic=false라 그대로는 ERR_CLEARTEXT_NOT_PERMITTED로 막히므로,
-                    // 허용된 호스트에 한해 https로 올려서 연다(해당 호스트들은 https로도 서비스된다).
-                    if (url.startsWith("http://")) {
-                        String upgraded = "https://" + url.substring("http://".length());
-                        long now = System.currentTimeMillis();
-                        boolean loopSuspected = upgraded.equals(lastUpgradedUrl) && now - lastUpgradedAt < 3000;
-                        if (!loopSuspected && !isBlacklistedUrl(upgraded) && !isExternalUrl(upgraded)) {
-                            lastUpgradedUrl = upgraded;
-                            lastUpgradedAt = now;
-                            view.loadUrl(upgraded);
-                            return true;
-                        }
-                    }
-
-                    if (url.toLowerCase().contains(".apk")) {
-                        downloadApkFile(url);
-                        return true;
-                    }
-
-                    if (isBlacklistedUrl(url) || isExternalUrl(url)) {
-                        Toast.makeText(MainActivity.this, "보안 정책상 허용되지 않은 페이지입니다.", Toast.LENGTH_SHORT).show();
-                        return true;
-                    }
-                    view.loadUrl(url);
-                    return true;
-                }
-
-                // 🔒 잘못된(자체서명/만료/호스트 불일치) 인증서는 무조건 거부한다.
-                // proceed()로 무시하면 같은 네트워크의 공격자가 중간자 공격으로
-                // 모든 HTTPS 트래픽을 가로챌 수 있게 되므로 절대 허용하지 않는다.
-                @Override
-                public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                    Log.e(TAG, "SSL 인증서 오류로 접속 차단: " + error);
-                    Toast.makeText(MainActivity.this, "🔒 안전하지 않은 연결이라 접속을 차단했습니다.", Toast.LENGTH_SHORT).show();
-                    handler.cancel();
-                }
-
-                // 🩹 WebView 렌더러 프로세스가 (메모리 부족 등으로) 따로 죽는 경우 —
-                // 일반 크래시 핸들러로는 못 잡기 때문에 화면이 그대로 멈춰버릴 수 있다.
-                // 죽은 렌더러가 붙어있던 WebView는 재사용이 안 되므로 앱 자체를 재시작한다.
-                @Override
-                public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
-                    lastRendererCrashAt = System.currentTimeMillis();
-                    Log.e(TAG, "🚨 WebView 렌더러 프로세스 종료 감지(crashed=" + detail.didCrash() + ") — 앱을 재시작합니다.");
-                    if (view != null) view.destroy();
-                    restartApp();
-                    return true;
-                }
-
-                @Override
-                public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                    super.onReceivedError(view, request, error);
-
-                    if (swipeRefreshLayout != null && swipeRefreshLayout.isRefreshing()) {
-                        swipeRefreshLayout.setRefreshing(false);
-                    }
-
-                    if (request.isForMainFrame()) {
-                        Log.w(TAG, "⚠️ 네트워크 끊김 감지: " + error.getDescription());
-
-                        // 🩹 화면에 이미 콘텐츠가 떠 있던 상태에서 잠깐 끊긴 거라면, 화면 전체를
-                        // 에러 페이지로 덮어써서 지우는 대신 작은 안내만 띄운다 — 재연결되면
-                        // registerNetworkCallback()의 onAvailable()이 알아서 새로고침해준다.
-                        if (hasLoadedContentOnce && !isShowingNetworkErrorPage) {
-                            Toast.makeText(MainActivity.this, "📶 인터넷 연결이 끊겼습니다. 재연결되면 자동으로 새로고침됩니다.", Toast.LENGTH_LONG).show();
-                            return;
-                        }
-
-                        String failedUrl = request.getUrl() != null ? request.getUrl().toString() : "https://u2mkst.github.io/home";
-                        String retryUrl = failedUrl.replace("\\", "\\\\").replace("'", "\\'");
-
-                        String errorHtml = "<!DOCTYPE html>" +
-                                "<html><head><meta charset='UTF-8'>" +
-                                "<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no'>" +
-                                "<style>" +
-                                "* { margin: 0; padding: 0; box-sizing: border-box; }" +
-                                "html, body { width: 100%; height: 100%; background: #F2F4F6; " +
-                                "  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Malgun Gothic', sans-serif; }" +
-                                ".wrap { width: 100vw; height: 100vh; display: flex; flex-direction: column; " +
-                                "  align-items: center; justify-content: center; padding: 24px; text-align: center; }" +
-                                ".icon { width: 56px; height: 56px; margin-bottom: 22px; }" +
-                                "h1 { font-size: 20px; font-weight: 800; color: #191F28; margin-bottom: 8px; }" +
-                                "p { font-size: 13.5px; color: #8B95A1; line-height: 1.6; margin-bottom: 30px; }" +
-                                "button { font-family: inherit; font-size: 15px; font-weight: 700; color: #FFFFFF; " +
-                                "  background: #004BBF; border: none; border-radius: 14px; padding: 14px 34px; }" +
-                                "button:active { opacity: 0.85; }" +
-                                "</style></head><body>" +
-                                "<div class='wrap'>" +
-                                "  <svg class='icon' viewBox='0 0 24 24'>" +
-                                "    <path fill='#8B95A1' fill-opacity='0.4' d='M1,14L5,14L5,20L1,20Z M7,10L11,10L11,20L7,20Z M13,6L17,6L17,20L13,20Z M19,2L23,2L23,20L19,20Z'/>" +
-                                "    <path stroke='#191F28' stroke-width='2.2' stroke-linecap='round' d='M2,21L22,3'/>" +
-                                "  </svg>" +
-                                "  <h1>네트워크 연결 실패</h1>" +
-                                "  <p>네트워크 상태를 확인한 뒤<br>다시 시도해 주세요</p>" +
-                                "  <button onclick=\"location.href='" + retryUrl + "'\">다시 시도</button>" +
-                                "</div>" +
-                                "</body></html>";
-
-                        isShowingNetworkErrorPage = true;
-                        view.loadDataWithBaseURL("https://u2mkst.github.io/", errorHtml, "text/html", "UTF-8", null);
-                    }
-                }
-
-                @Override
-                public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
-                    super.doUpdateVisitedHistory(view, url, isReload);
-                    checkAndToggleHomeButton(url);
-                }
-
-                @Override
-                public void onPageFinished(WebView view, String url) {
-                    super.onPageFinished(view, url);
-
-                    if (swipeRefreshLayout != null && swipeRefreshLayout.isRefreshing()) {
-                        swipeRefreshLayout.setRefreshing(false);
-                    }
-
-                    // 오프라인 에러 페이지는 baseURL("https://u2mkst.github.io/")로만 보고되므로,
-                    // 실제 콘텐츠 경로(/home, /login 등)로 넘어간 경우에만 에러 상태를 해제한다.
-                    if (!"https://u2mkst.github.io/".equals(url)) {
-                        isShowingNetworkErrorPage = false;
-                        hasLoadedContentOnce = true;
-                    }
-
-                    injectHeartbeatBridge(view);
-                    injectScrollBridge(view);
-                    checkAndToggleHomeButton(url);
-                    if (url == null) return;
-
-                    if (url.contains("swgwanggyo.u2math.co.kr/Main/Iu2mfc")) {
-                        view.loadUrl("https://swgwanggyo.u2math.co.kr/Mypage/MyMenu/");
-                        return;
-                    }
-
-                    // 🍪 쿠키 플러시 (세션 동기화 유지)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        CookieManager.getInstance().flush();
-                    }
-
-                    // 🔑 계정 주입 및 자동 로그인 실행
-                    boolean isAlreadyLoggedInPage = url.contains("Mypage") || url.contains("MyMenu") || url.contains("mypage");
-
-                    if (url.contains("u2math.co.kr") && !isAlreadyLoggedInPage && !savedU2mId.isEmpty() && !savedPhone.isEmpty()) {
-                        injectOriginalU2MCode(view, savedU2mId, savedPhone);
-                    } else if ((url.contains("mathflat.com") || url.contains("mathflat.co.kr")) && !url.contains("/student/")) {
-                        if (!savedStudentPhone.isEmpty() && !savedMathflatPw.isEmpty()) {
-                            injectMathflatCode(view, savedStudentPhone, savedMathflatPw);
-                        }
-                    }
-
-                    // 🎧 동영상 재생 시 이어폰 착용 여부 감지 스크립트 오버라이드
-                    String earphoneJs = "javascript:(function() {" +
-                            "    var videos = document.getElementsByTagName('video');" +
-                            "    for (var i = 0; i < videos.length; i++) {" +
-                            "        videos[i].addEventListener('play', function(e) {" +
-                            "            if (window.AndroidApp && !window.AndroidApp.isEarphonesPlugged()) {" +
-                            "                this.pause();" +
-                            "                window.AndroidApp.checkEarphonesBeforeVideo();" +
-                            "            }" +
-                            "        });" +
-                            "    }" +
-                            "})()";
-                    view.evaluateJavascript(earphoneJs, null);
-                }
-            });
-
-            // Javascript Interface 등록
-            webView.addJavascriptInterface(new AndroidBridge(), "AndroidApp");
             // 🔐 앱을 완전히 종료했다 다시 켜는 경우(화면 꺼짐이 아니라 프로세스 자체가
             // 새로 시작하는 경우)에는 화면 꺼짐 브로드캐스트가 못 잡으므로, 매 콜드 스타트마다
             // 한 번 더 세션을 정리해서 이전 사용자로 자동 로그인되는 일을 막는다.
             executeSessionClear();
-            webView.loadUrl("https://u2mkst.github.io/home/login");
+            openTab(START_URL);
 
-            // 🚫 뒤로가기 완전 차단 — 화면 이동은 무조건 플로팅 홈 버튼으로만 하도록 강제한다.
-            // (관리자 종료는 상단 종료 아이콘(ivQuit)으로 별도 접근 가능하므로 뒤로가기에 묶을 필요 없음)
+            // ⬅️ 시스템 뒤로가기 — 현재 탭의 이전 페이지로만 이동한다. 더 갈 곳이 없어도 앱은 종료되지
+            // 않는다(관리자 종료는 상단 종료 아이콘으로만 가능).
             getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
                 @Override
                 public void handleOnBackPressed() {
-                    Toast.makeText(MainActivity.this, "🏠 홈 버튼을 이용해 주세요.", Toast.LENGTH_SHORT).show();
+                    if (currentTab != null && currentTab.webView.canGoBack()) {
+                        goBack(currentTab);
+                    } else {
+                        Toast.makeText(MainActivity.this, "더 이상 뒤로 갈 수 없어요.", Toast.LENGTH_SHORT).show();
+                    }
                 }
             });
 
@@ -625,6 +362,653 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             showEmergencyDiagnosticScreen(e);
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 🌐 브라우저: 툴바 / 탭 / 주소창
+    // ---------------------------------------------------------------------------------------------
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    // 🔄 당겨서 새로고침
+    // WebView는 NestedScrollingChild를 구현하지 않아 SwipeRefreshLayout이 제스처를
+    // 가로챌지 판단할 때 getScrollY() 값이 터치 이벤트와 정확히 동기화되지 않는
+    // 경우가 있다 — 이 때문에 맨 위가 아닌 곳에서 위로 스크롤해도 새로고침이 발동하는
+    // 문제가 생긴다. canScrollVertically(-1)로 판단을 대체하고, 탭마다 스크롤 위치에 따라
+    // 제스처 자체를 껐다 켰다 해서 스크롤 맨 위에서만 새로고침이 가능하도록 이중으로 막는다.
+    private void setupSwipeRefresh() {
+        if (swipeRefreshLayout == null) return;
+        swipeRefreshLayout.setOnRefreshListener(() -> {
+            if (currentTab != null) reloadTab(currentTab);
+            // 새로고침이 시작되지 않는 경우(차단 화면 등)에도 표시가 계속 남지 않게 한다.
+            swipeRefreshLayout.postDelayed(() -> swipeRefreshLayout.setRefreshing(false), 8000);
+        });
+        swipeRefreshLayout.setOnChildScrollUpCallback((parent, child) ->
+                currentTab != null && currentTab.webView.canScrollVertically(-1));
+    }
+
+    private void setupToolbar() {
+        ivBack.setOnClickListener(v -> {
+            if (currentTab != null) goBack(currentTab);
+        });
+        ivForward.setOnClickListener(v -> {
+            if (currentTab != null) goForward(currentTab);
+        });
+        ivReload.setOnClickListener(v -> {
+            if (currentTab == null) return;
+            if (currentTab.loading) currentTab.webView.stopLoading();
+            else reloadTab(currentTab);
+        });
+        ivHome.setOnClickListener(v -> {
+            if (currentTab != null) navigate(currentTab, START_URL);
+        });
+        ivNewTab.setOnClickListener(v -> openTab(START_URL));
+
+        etAddress.setOnEditorActionListener((v, actionId, event) -> {
+            boolean isGo = actionId == EditorInfo.IME_ACTION_GO
+                    || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
+                            && event.getAction() == KeyEvent.ACTION_DOWN);
+            if (!isGo) return false;
+            submitAddress(v.getText().toString());
+            return true;
+        });
+        // 주소창에서 빠져나오면(다른 곳을 눌러 포커스를 잃으면) 현재 탭의 주소로 되돌려 보여준다.
+        etAddress.setOnFocusChangeListener((v, hasFocus) -> {
+            if (!hasFocus) updateAddressBar();
+        });
+        updateNavButtons();
+    }
+
+    private void submitAddress(String raw) {
+        BrowserTab tab = currentTab;
+        hideKeyboard();
+        if (tab == null) return;
+        String typed = raw == null ? "" : raw.trim();
+        if (typed.isEmpty()) {
+            updateAddressBar();
+            return;
+        }
+        String url = SiteAccessPolicy.normalizeTypedInput(typed);
+        if (url == null) {
+            // 주소처럼 보이지 않는 글자(검색어 등)는 검색하지 않고 안내 화면으로 보낸다.
+            showBlockedPage(tab, typed, true);
+        } else {
+            navigate(tab, url);
+        }
+    }
+
+    private void hideKeyboard() {
+        try {
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null && etAddress != null) imm.hideSoftInputFromWindow(etAddress.getWindowToken(), 0);
+            // EditText가 포커스를 다시 가져가 키보드가 도로 뜨지 않도록 툴바 배경으로 포커스를 옮긴다.
+            if (toolbarView != null) toolbarView.requestFocus();
+        } catch (Exception e) {
+            Log.e(TAG, "키보드 숨김 실패: " + e.getMessage());
+        }
+        hideSystemUI();
+    }
+
+    private void updateAddressBar() {
+        if (etAddress == null || etAddress.hasFocus()) return;
+        BrowserTab tab = currentTab;
+        String shown = "";
+        if (tab != null && tab.url != null && !tab.url.isEmpty() && !tab.url.equals(START_URL)) {
+            shown = tab.url.replaceFirst("^https?://", "");
+            if (shown.endsWith("/")) shown = shown.substring(0, shown.length() - 1);
+        }
+        etAddress.setText(shown);
+    }
+
+    private void updateNavButtons() {
+        if (ivBack == null) return;
+        BrowserTab tab = currentTab;
+        boolean canBack = tab != null && tab.webView.canGoBack();
+        boolean canForward = tab != null && tab.webView.canGoForward();
+        ivBack.setAlpha(canBack ? 1f : 0.35f);
+        ivBack.setEnabled(canBack);
+        ivForward.setAlpha(canForward ? 1f : 0.35f);
+        ivForward.setEnabled(canForward);
+        ivReload.setImageResource(tab != null && tab.loading ? R.drawable.ic_close : R.drawable.ic_refresh);
+    }
+
+    private void updateLoadingUi() {
+        if (pbLoading == null) return;
+        BrowserTab tab = currentTab;
+        if (tab != null && tab.loading && tab.progress < 100) {
+            pbLoading.setVisibility(View.VISIBLE);
+            pbLoading.setProgress(tab.progress);
+        } else {
+            pbLoading.setVisibility(View.GONE);
+        }
+    }
+
+    // 새 탭을 열고 url을 불러온다. 최대 개수를 넘으면 열지 않고 null.
+    private BrowserTab openTab(String url) {
+        if (tabs.size() >= MAX_TABS) {
+            Toast.makeText(this, "탭은 최대 " + MAX_TABS + "개까지 열 수 있어요.", Toast.LENGTH_SHORT).show();
+            return null;
+        }
+        WebView webView = new WebView(this);
+        webView.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        webView.setVisibility(View.GONE);
+        BrowserTab tab = new BrowserTab(webView);
+        configureWebView(tab);
+
+        tabs.add(tab);
+        webContainer.addView(webView);
+        createTabView(tab);
+        switchToTab(tab);
+        navigate(tab, url);
+        return tab;
+    }
+
+    private void createTabView(BrowserTab tab) {
+        LinearLayout item = new LinearLayout(this);
+        item.setOrientation(LinearLayout.HORIZONTAL);
+        item.setGravity(Gravity.CENTER_VERTICAL);
+        item.setPadding(dp(12), 0, dp(4), 0);
+        LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(dp(170), dp(34));
+        itemParams.setMargins(dp(2), dp(6), 0, 0);
+        item.setLayoutParams(itemParams);
+
+        TextView title = new TextView(this);
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        title.setText(tab.title);
+        title.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        ImageView close = new ImageView(this);
+        close.setImageResource(R.drawable.ic_close);
+        close.setPadding(dp(6), dp(6), dp(6), dp(6));
+        close.setContentDescription("탭 닫기");
+        close.setLayoutParams(new LinearLayout.LayoutParams(dp(26), dp(26)));
+        close.setOnClickListener(v -> closeTab(tab));
+
+        item.addView(title);
+        item.addView(close);
+        item.setOnClickListener(v -> switchToTab(tab));
+
+        tab.tabView = item;
+        tab.titleView = title;
+        tab.closeView = close;
+        tabContainer.addView(item);
+        styleTabView(tab, false);
+    }
+
+    private void styleTabView(BrowserTab tab, boolean selected) {
+        if (tab.tabView == null) return;
+        float r = dp(10);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.parseColor(selected ? "#F2F4F6" : "#2B313D"));
+        bg.setCornerRadii(new float[]{r, r, r, r, 0, 0, 0, 0});
+        tab.tabView.setBackground(bg);
+        tab.titleView.setTextColor(Color.parseColor(selected ? "#191F28" : "#B7C0CC"));
+        tab.closeView.setColorFilter(Color.parseColor(selected ? "#3C4350" : "#B7C0CC"));
+    }
+
+    private void updateTabTitle(BrowserTab tab) {
+        if (tab.titleView == null) return;
+        String shown = tab.title;
+        if (shown == null || shown.trim().isEmpty()) {
+            String host = SiteAccessPolicy.hostOf(tab.url);
+            shown = host != null ? host : "새 탭";
+        }
+        tab.titleView.setText(shown);
+    }
+
+    private void switchToTab(BrowserTab target) {
+        if (target == null) return;
+        for (BrowserTab tab : tabs) {
+            boolean selected = tab == target;
+            tab.webView.setVisibility(selected ? View.VISIBLE : View.GONE);
+            if (selected) tab.webView.onResume();
+            else tab.webView.onPause();
+            styleTabView(tab, selected);
+        }
+        currentTab = target;
+        if (target.tabView != null && tabScroll != null) {
+            tabScroll.post(() -> tabScroll.smoothScrollTo(Math.max(0, target.tabView.getLeft() - dp(40)), 0));
+        }
+        if (swipeRefreshLayout != null) swipeRefreshLayout.setEnabled(true);
+        if (etAddress != null && etAddress.hasFocus()) hideKeyboard();
+        updateAddressBar();
+        updateNavButtons();
+        updateLoadingUi();
+    }
+
+    private void closeTab(BrowserTab tab) {
+        int index = tabs.indexOf(tab);
+        if (index < 0) return;
+        tabs.remove(tab);
+        if (tab.tabView != null) tabContainer.removeView(tab.tabView);
+        destroyTabWebView(tab);
+
+        if (tabs.isEmpty()) {
+            currentTab = null;
+            openTab(START_URL);
+        } else if (tab == currentTab) {
+            switchToTab(tabs.get(Math.min(index, tabs.size() - 1)));
+        }
+    }
+
+    private void destroyTabWebView(BrowserTab tab) {
+        try {
+            tab.webView.stopLoading();
+            webContainer.removeView(tab.webView);
+            tab.webView.destroy();
+        } catch (Exception e) {
+            Log.e(TAG, "탭 정리 실패: " + e.getMessage());
+        }
+    }
+
+    // 모든 탭을 닫고 시작 페이지 탭 하나만 새로 연다 (화면 꺼짐 후 재진입 등).
+    private void resetToStartTab() {
+        for (BrowserTab tab : new ArrayList<>(tabs)) {
+            destroyTabWebView(tab);
+        }
+        tabs.clear();
+        tabContainer.removeAllViews();
+        currentTab = null;
+        openTab(START_URL);
+    }
+
+    private void reloadTab(BrowserTab tab) {
+        if (tab.blocked || tab.showingNetworkError) {
+            // 안내 화면 상태에서는 같은 주소를 다시 판정해서 연다 (그 사이 허용 목록이 바뀌었을 수 있다).
+            String retry = SiteAccessPolicy.normalizeTypedInput(tab.url);
+            if (retry != null) navigate(tab, retry);
+            else showBlockedPage(tab, tab.url, true);
+        } else {
+            tab.webView.reload();
+        }
+    }
+
+    // 앱 브릿지(로그인 정보 전달 등)는 우리 사이트에서만 열고, 다른 사이트에는 거둔다.
+    // 이동 직전에 호출해야 다음 페이지 로드부터 반영된다.
+    private void applyBridgePolicy(WebView webView, String url) {
+        if (SiteAccessPolicy.isCoreSite(url)) {
+            webView.addJavascriptInterface(androidBridge, "AndroidApp");
+        } else {
+            webView.removeJavascriptInterface("AndroidApp");
+        }
+    }
+
+    // 뒤로/앞으로 이동은 shouldOverrideUrlLoading을 거치지 않으므로, 이동할 페이지 기준으로 브릿지를 미리 맞춘다.
+    private void goBack(BrowserTab tab) {
+        WebBackForwardList list = tab.webView.copyBackForwardList();
+        int index = list.getCurrentIndex();
+        if (index <= 0) return;
+        applyBridgePolicy(tab.webView, list.getItemAtIndex(index - 1).getUrl());
+        tab.webView.goBack();
+    }
+
+    private void goForward(BrowserTab tab) {
+        WebBackForwardList list = tab.webView.copyBackForwardList();
+        int index = list.getCurrentIndex();
+        if (index < 0 || index >= list.getSize() - 1) return;
+        applyBridgePolicy(tab.webView, list.getItemAtIndex(index + 1).getUrl());
+        tab.webView.goForward();
+    }
+
+    // http → https 업그레이드가 서버 리다이렉트와 맞물려 무한 반복되는 걸 막기 위한 기록
+    private String lastUpgradedUrl = null;
+    private long lastUpgradedAt = 0;
+
+    // 탭의 모든 이동은 여기를 거친다: 허용 여부 판정 → (필요하면) https 올리기 → 브릿지 설정 → 로드.
+    private void navigate(BrowserTab tab, String url) {
+        if (url == null) return;
+        String target = url;
+
+        // 🔒 유투엠은 로그인 직후 학원 전용 서브도메인으로 "http://" 주소를 내려준다
+        // (예: http://swgwanggyo.u2math.co.kr/Login/Go?info=...). 이 앱은
+        // usesCleartextTraffic=false라 그대로는 ERR_CLEARTEXT_NOT_PERMITTED로 막히므로,
+        // 허용된 호스트에 한해 https로 올려서 연다(해당 호스트들은 https로도 서비스된다).
+        if (target.startsWith("http://")) {
+            String upgraded = "https://" + target.substring("http://".length());
+            long now = System.currentTimeMillis();
+            boolean loopSuspected = upgraded.equals(lastUpgradedUrl) && now - lastUpgradedAt < 3000;
+            if (!loopSuspected && sitePolicy.isAllowed(upgraded)) {
+                lastUpgradedUrl = upgraded;
+                lastUpgradedAt = now;
+                target = upgraded;
+            }
+        }
+
+        if (!sitePolicy.isAllowed(target)) {
+            showBlockedPage(tab, target, false);
+            return;
+        }
+
+        tab.blocked = false;
+        tab.showingNetworkError = false;
+        tab.url = target;
+        // 새 페이지 제목이 오기 전까지는 호스트를 탭 이름으로 보여준다.
+        tab.title = target.equals(START_URL) ? "새 탭" : String.valueOf(SiteAccessPolicy.hostOf(target));
+        updateTabTitle(tab);
+        applyBridgePolicy(tab.webView, target);
+        tab.webView.loadUrl(target);
+        if (tab == currentTab) updateAddressBar();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 🚫 안내 화면 (허용되지 않은 사이트 / 네트워크 오류)
+    // ---------------------------------------------------------------------------------------------
+
+    private static String pageShell(String iconHtml, String title, String message, String detail,
+                                    String buttonUrl, String buttonText) {
+        return "<!DOCTYPE html>" +
+                "<html><head><meta charset='UTF-8'>" +
+                "<title>" + Html.escapeHtml(title) + "</title>" +
+                "<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no'>" +
+                "<style>" +
+                "* { margin: 0; padding: 0; box-sizing: border-box; }" +
+                "html, body { width: 100%; height: 100%; background: #F2F4F6; " +
+                "  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Malgun Gothic', sans-serif; }" +
+                ".wrap { width: 100vw; height: 100vh; display: flex; flex-direction: column; " +
+                "  align-items: center; justify-content: center; padding: 24px; text-align: center; }" +
+                ".icon { width: 56px; height: 56px; margin-bottom: 22px; font-size: 48px; line-height: 56px; }" +
+                "h1 { font-size: 20px; font-weight: 800; color: #191F28; margin-bottom: 8px; }" +
+                "p { font-size: 13.5px; color: #8B95A1; line-height: 1.6; margin-bottom: 8px; }" +
+                ".detail { font-size: 12.5px; color: #4E5968; word-break: break-all; margin-bottom: 26px; max-width: 520px; }" +
+                "a.btn { display: inline-block; text-decoration: none; font-size: 15px; font-weight: 700; color: #FFFFFF; " +
+                "  background: #004BBF; border-radius: 14px; padding: 14px 34px; margin-top: 8px; }" +
+                "a.btn:active { opacity: 0.85; }" +
+                "</style></head><body>" +
+                "<div class='wrap'>" +
+                iconHtml +
+                "  <h1>" + Html.escapeHtml(title) + "</h1>" +
+                "  <p>" + message + "</p>" +
+                "  <div class='detail'>" + Html.escapeHtml(detail) + "</div>" +
+                "  <a class='btn' href=\"" + Html.escapeHtml(buttonUrl) + "\">" + Html.escapeHtml(buttonText) + "</a>" +
+                "</div>" +
+                "</body></html>";
+    }
+
+    // 허용 목록 밖이라 열 수 없는 주소(또는 주소가 아닌 검색어)를 안내 화면으로 보여준다.
+    private void showBlockedPage(BrowserTab tab, String attempted, boolean isSearchText) {
+        tab.blocked = true;
+        tab.showingNetworkError = false;
+        tab.url = attempted;
+        tab.title = "열 수 없는 사이트";
+        updateTabTitle(tab);
+
+        String detail = attempted;
+        if (!isSearchText) {
+            String host = SiteAccessPolicy.hostOf(attempted);
+            if (host != null) detail = host;
+        }
+        String message = isSearchText
+                ? "이 앱에서는 검색을 할 수 없어요.<br>선생님이 허용한 사이트 주소만 열 수 있어요."
+                : "선생님이 허용한 사이트만 열 수 있어요.";
+        String html = pageShell("<div class='icon'>🔒</div>", "열 수 없는 사이트예요", message, detail,
+                START_URL, "시작 페이지로");
+        tab.webView.removeJavascriptInterface("AndroidApp");
+        tab.webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+        if (tab == currentTab) {
+            updateAddressBar();
+            updateNavButtons();
+        }
+    }
+
+    private void showNetworkErrorPage(BrowserTab tab, String failedUrl) {
+        tab.showingNetworkError = true;
+        tab.url = failedUrl;
+        String icon = "<svg class='icon' viewBox='0 0 24 24'>" +
+                "<path fill='#8B95A1' fill-opacity='0.4' d='M1,14L5,14L5,20L1,20Z M7,10L11,10L11,20L7,20Z M13,6L17,6L17,20L13,20Z M19,2L23,2L23,20L19,20Z'/>" +
+                "<path stroke='#191F28' stroke-width='2.2' stroke-linecap='round' d='M2,21L22,3'/>" +
+                "</svg>";
+        String html = pageShell(icon, "네트워크 연결 실패", "네트워크 상태를 확인한 뒤<br>다시 시도해 주세요", "",
+                failedUrl, "다시 시도");
+        tab.webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 🌐 탭 웹뷰 설정
+    // ---------------------------------------------------------------------------------------------
+
+    private void configureWebView(BrowserTab tab) {
+        WebView webView = tab.webView;
+
+        WebSettings webSettings = webView.getSettings();
+        webSettings.setJavaScriptEnabled(true);
+        webSettings.setDomStorageEnabled(true);
+        webSettings.setUseWideViewPort(true);
+        webSettings.setLoadWithOverviewMode(true);
+        webSettings.setJavaScriptCanOpenWindowsAutomatically(true);
+        webSettings.setDatabaseEnabled(true);
+        webSettings.setCacheMode(WebSettings.LOAD_DEFAULT);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        }
+
+        // 🍪 쿠키 허용 설정 (로그인 세션 유지)
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.setAcceptCookie(true);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            cookieManager.setAcceptThirdPartyCookies(webView, true);
+        }
+
+        // 구글이 "; wv" 토큰으로 임베디드 웹뷰를 감지해 reCAPTCHA/로그인 등을 차단하므로
+        // 커스텀 문자열은 덧붙이지 않고 표준 크롬 브라우저처럼 보이도록 wv 토큰만 제거한다.
+        String defaultUserAgent = webSettings.getUserAgentString();
+        webSettings.setUserAgentString(defaultUserAgent.replace("; wv", ""));
+
+        webView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
+            if (tab == currentTab && swipeRefreshLayout != null) swipeRefreshLayout.setEnabled(scrollY == 0);
+        });
+
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
+                Log.d(TAG, "[WebConsole] " + consoleMessage.message());
+                return true;
+            }
+
+            @Override
+            public void onProgressChanged(WebView view, int newProgress) {
+                tab.progress = newProgress;
+                if (tab == currentTab) updateLoadingUi();
+            }
+
+            @Override
+            public void onReceivedTitle(WebView view, String title) {
+                if (title == null || title.trim().isEmpty() || BrowserTab.isInternalPageUrl(title)) return;
+                tab.title = title.trim();
+                updateTabTitle(tab);
+            }
+        });
+
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                String url = request.getUrl().toString();
+                String host = SiteAccessPolicy.hostOf(url);
+
+                // iframe 등 프레임 안의 이동: 허용된 사이트면 그대로 두고, 아니면 막는다.
+                if (!request.isForMainFrame()) {
+                    if (host != null) return !sitePolicy.isAllowed(url);
+                    String scheme = request.getUrl().getScheme();
+                    return !("about".equals(scheme) || "blob".equals(scheme) || "data".equals(scheme));
+                }
+
+                // 🔒 http/https가 아닌 모든 링크(intent:, tel:, file: 등)와 시스템 설정 진입은 막는다.
+                if (host == null) {
+                    if (url.startsWith("intent:") && url.contains("com.android.settings")) {
+                        Toast.makeText(MainActivity.this, "🔒 시스템 설정 진입이 제한되어 있습니다.", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(MainActivity.this, "보안 정책상 허용되지 않은 링크입니다.", Toast.LENGTH_SHORT).show();
+                    }
+                    return true;
+                }
+
+                if (url.contains("swgwanggyo.u2math.co.kr/Main/Iu2mfc")) {
+                    navigate(tab, "https://swgwanggyo.u2math.co.kr/Mypage/MyMenu/");
+                    return true;
+                }
+
+                // 앱 설치 파일은 우리 사이트가 내려주는 것만 받는다.
+                if (url.toLowerCase().contains(".apk")) {
+                    if (SiteAccessPolicy.isCoreSite(url)) {
+                        downloadApkFile(url);
+                    } else {
+                        Toast.makeText(MainActivity.this, "보안 정책상 허용되지 않은 파일입니다.", Toast.LENGTH_SHORT).show();
+                    }
+                    return true;
+                }
+
+                navigate(tab, url);
+                return true;
+            }
+
+            // 🔒 잘못된(자체서명/만료/호스트 불일치) 인증서는 무조건 거부한다.
+            // proceed()로 무시하면 같은 네트워크의 공격자가 중간자 공격으로
+            // 모든 HTTPS 트래픽을 가로챌 수 있게 되므로 절대 허용하지 않는다.
+            @Override
+            public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
+                Log.e(TAG, "SSL 인증서 오류로 접속 차단: " + error);
+                Toast.makeText(MainActivity.this, "🔒 안전하지 않은 연결이라 접속을 차단했습니다.", Toast.LENGTH_SHORT).show();
+                handler.cancel();
+            }
+
+            // 🩹 WebView 렌더러 프로세스가 (메모리 부족 등으로) 따로 죽는 경우 —
+            // 일반 크래시 핸들러로는 못 잡기 때문에 화면이 그대로 멈춰버릴 수 있다.
+            // 죽은 렌더러가 붙어있던 WebView는 재사용이 안 되므로 앱 자체를 재시작한다.
+            @Override
+            public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+                lastRendererCrashAt = System.currentTimeMillis();
+                Log.e(TAG, "🚨 WebView 렌더러 프로세스 종료 감지(crashed=" + detail.didCrash() + ") — 앱을 재시작합니다.");
+                if (view != null) view.destroy();
+                restartApp();
+                return true;
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                super.onReceivedError(view, request, error);
+
+                if (swipeRefreshLayout != null && swipeRefreshLayout.isRefreshing()) {
+                    swipeRefreshLayout.setRefreshing(false);
+                }
+
+                if (request.isForMainFrame()) {
+                    Log.w(TAG, "⚠️ 네트워크 끊김 감지: " + error.getDescription());
+
+                    String failedUrl = request.getUrl() != null ? request.getUrl().toString() : START_URL;
+
+                    // 🩹 화면에 이미 같은 페이지가 떠 있던 상태에서 잠깐 끊긴 거라면, 화면 전체를
+                    // 에러 페이지로 덮어써서 지우는 대신 작은 안내만 띄운다 — 재연결되면
+                    // registerNetworkCallback()의 onAvailable()이 알아서 새로고침해준다.
+                    if (tab.loadedOnce && !tab.showingNetworkError && failedUrl.equals(view.getUrl())) {
+                        Toast.makeText(MainActivity.this, "📶 인터넷 연결이 끊겼습니다. 재연결되면 자동으로 새로고침됩니다.", Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    showNetworkErrorPage(tab, failedUrl);
+                }
+            }
+
+            @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                tab.loading = true;
+                tab.progress = 0;
+                if (!BrowserTab.isInternalPageUrl(url)) {
+                    // 🔒 뒤로가기 기록, 서버 리다이렉트 등 어떤 경로로 왔든 허용 목록 밖이면 여기서도 막는다.
+                    if (!sitePolicy.isAllowed(url)) {
+                        view.stopLoading();
+                        showBlockedPage(tab, url, false);
+                        return;
+                    }
+                    tab.onUrlChanged(url);
+                    if (!SiteAccessPolicy.isCoreSite(url)) view.removeJavascriptInterface("AndroidApp");
+                }
+                if (tab == currentTab) {
+                    updateAddressBar();
+                    updateNavButtons();
+                    updateLoadingUi();
+                }
+            }
+
+            @Override
+            public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
+                super.doUpdateVisitedHistory(view, url, isReload);
+                tab.onUrlChanged(url);
+                if (tab == currentTab) {
+                    updateAddressBar();
+                    updateNavButtons();
+                }
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+
+                tab.loading = false;
+                tab.progress = 100;
+                if (swipeRefreshLayout != null && swipeRefreshLayout.isRefreshing()) {
+                    swipeRefreshLayout.setRefreshing(false);
+                }
+
+                // 직접 그린 안내 화면(차단/네트워크 오류)은 내용이 로드된 것으로 치지 않는다.
+                if (!BrowserTab.isInternalPageUrl(url)) {
+                    tab.showingNetworkError = false;
+                    tab.loadedOnce = true;
+                }
+                if (tab == currentTab) {
+                    updateNavButtons();
+                    updateLoadingUi();
+                }
+
+                if (BrowserTab.isInternalPageUrl(url)) return;
+
+                injectHeartbeatBridge(view);
+                injectScrollBridge(view);
+
+                if (url.contains("swgwanggyo.u2math.co.kr/Main/Iu2mfc")) {
+                    navigate(tab, "https://swgwanggyo.u2math.co.kr/Mypage/MyMenu/");
+                    return;
+                }
+
+                // 🍪 쿠키 플러시 (세션 동기화 유지)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    CookieManager.getInstance().flush();
+                }
+
+                // 🔑 계정 주입 및 자동 로그인 실행 — 주소 글자가 아니라 "호스트"가 유투엠/매쓰플랫일 때만.
+                boolean isAlreadyLoggedInPage = url.contains("Mypage") || url.contains("MyMenu") || url.contains("mypage");
+
+                if (SiteAccessPolicy.isU2mSite(url) && !isAlreadyLoggedInPage && !savedU2mId.isEmpty() && !savedPhone.isEmpty()) {
+                    injectOriginalU2MCode(view, savedU2mId, savedPhone);
+                } else if (SiteAccessPolicy.isMathflatSite(url) && !url.contains("/student/")) {
+                    if (!savedStudentPhone.isEmpty() && !savedMathflatPw.isEmpty()) {
+                        injectMathflatCode(view, savedStudentPhone, savedMathflatPw);
+                    }
+                }
+
+                // 🎧 동영상 재생 시 이어폰 착용 여부 감지 스크립트 오버라이드 (모든 사이트 공통: KpGuard)
+                String earphoneJs = "javascript:(function() {" +
+                        "    var videos = document.getElementsByTagName('video');" +
+                        "    for (var i = 0; i < videos.length; i++) {" +
+                        "        videos[i].addEventListener('play', function(e) {" +
+                        "            if (window.KpGuard && !window.KpGuard.isEarphonesPlugged()) {" +
+                        "                this.pause();" +
+                        "                window.KpGuard.checkEarphonesBeforeVideo();" +
+                        "            }" +
+                        "        });" +
+                        "    }" +
+                        "})()";
+                view.evaluateJavascript(earphoneJs, null);
+            }
+        });
+
+        // 모든 사이트에 열리는 건 이어폰 확인용 최소 브릿지뿐이다. 앱 연동 브릿지(AndroidApp)는
+        // 이동할 때마다 우리 사이트에서만 붙는다(applyBridgePolicy).
+        webView.addJavascriptInterface(kpGuard, "KpGuard");
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -653,9 +1037,8 @@ public class MainActivity extends AppCompatActivity {
         if (isPendingScreenOffLogout) {
             isPendingScreenOffLogout = false;
             executeSessionClear();
-            if (webView != null) {
-                webView.loadUrl("https://u2mkst.github.io/home");
-            }
+            // 화면이 꺼졌다 켜지면 이전 학생의 탭이 남지 않도록 전부 닫고 시작 페이지부터 다시 연다.
+            resetToStartTab();
         }
     }
 
@@ -769,10 +1152,15 @@ public class MainActivity extends AppCompatActivity {
                     public void onAvailable(Network network) {
                         runOnUiThread(() -> {
                             updateNetworkStatusIcon();
-                            if (webView != null && isShowingNetworkErrorPage) {
+                            boolean reloaded = false;
+                            for (BrowserTab tab : new ArrayList<>(tabs)) {
+                                if (tab.showingNetworkError) {
+                                    reloadTab(tab);
+                                    reloaded = true;
+                                }
+                            }
+                            if (reloaded) {
                                 Toast.makeText(MainActivity.this, "📶 인터넷이 재연결되었습니다. 페이지를 새로고칩니다.", Toast.LENGTH_SHORT).show();
-                                isHomeButtonHidden = false;
-                                webView.reload();
                             }
                         });
                     }
@@ -1026,49 +1414,6 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
-    // ⏱️ 오늘 공부(접속) 시간 ------------------------------------------------
-    private String todayDateKey() {
-        return new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(new java.util.Date());
-    }
-
-    private void loadStudyTimeForToday() {
-        studyDateKey = todayDateKey();
-        SharedPreferences prefs = getSharedPreferences(STUDY_PREFS, Context.MODE_PRIVATE);
-        String savedDate = prefs.getString(STUDY_KEY_DATE, "");
-        studySecondsToday = studyDateKey.equals(savedDate) ? prefs.getLong(STUDY_KEY_SECONDS, 0) : 0;
-        if (tvStudyTime != null) tvStudyTime.setText(formatStudyTime(studySecondsToday));
-    }
-
-    // 1초 틱마다 호출 — 날짜가 바뀌었으면(자정을 넘겼으면) 0부터 다시 센다.
-    private void tickStudyTime() {
-        if (tvStudyTime == null) return;
-        String nowKey = todayDateKey();
-        if (!nowKey.equals(studyDateKey)) {
-            studyDateKey = nowKey;
-            studySecondsToday = 0;
-        }
-        studySecondsToday++;
-        tvStudyTime.setText(formatStudyTime(studySecondsToday));
-    }
-
-    private void persistStudyTime() {
-        try {
-            getSharedPreferences(STUDY_PREFS, Context.MODE_PRIVATE).edit()
-                    .putString(STUDY_KEY_DATE, studyDateKey)
-                    .putLong(STUDY_KEY_SECONDS, studySecondsToday)
-                    .apply();
-        } catch (Exception e) {
-            Log.e(TAG, "공부 시간 저장 실패: " + e.getMessage());
-        }
-    }
-
-    private String formatStudyTime(long totalSeconds) {
-        long h = totalSeconds / 3600;
-        long m = (totalSeconds % 3600) / 60;
-        long s = totalSeconds % 60;
-        return String.format(java.util.Locale.getDefault(), "⏱ %d:%02d:%02d", h, m, s);
-    }
-
     // 🔋 상단 상태 바의 배터리 표시를 현재 잔량으로 초기화
     private void updateBatteryStatusText() {
         try {
@@ -1209,9 +1554,11 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        if (webView != null) {
+        // 스캔 결과는 우리 사이트를 보고 있을 때만 페이지로 넘긴다 (다른 사이트에는 전달하지 않는다).
+        BrowserTab tab = currentTab;
+        if (tab != null && SiteAccessPolicy.isCoreSite(tab.url)) {
             String js = "window.onKstQrScanned && window.onKstQrScanned(" + toJsStringLiteral(content) + ");";
-            webView.evaluateJavascript(js, null);
+            tab.webView.evaluateJavascript(js, null);
         }
         Toast.makeText(this, "QR 스캔 완료", Toast.LENGTH_SHORT).show();
     }
@@ -1391,7 +1738,6 @@ public class MainActivity extends AppCompatActivity {
     protected void onPause() {
         super.onPause();
         Toast.makeText(this, "보안 규정상 캡처 및 화면 녹화를 할 수 없습니다.", Toast.LENGTH_SHORT).show();
-        persistStudyTime(); // 갑자기 종료돼도 지금까지 쌓인 공부 시간은 남도록
     }
 
     private void showEmergencyDiagnosticScreen(Exception e) {
@@ -1438,48 +1784,16 @@ public class MainActivity extends AppCompatActivity {
             WebStorage.getInstance().deleteAllData();
 
             runOnUiThread(() -> {
-                if (webView != null) {
-                    webView.clearCache(true);
-                    webView.clearFormData();
-                    webView.clearHistory();
-                    webView.evaluateJavascript("window.localStorage.clear(); window.sessionStorage.clear();", null);
+                for (BrowserTab tab : tabs) {
+                    tab.webView.clearCache(true);
+                    tab.webView.clearFormData();
+                    tab.webView.clearHistory();
+                    tab.webView.evaluateJavascript("window.localStorage.clear(); window.sessionStorage.clear();", null);
                 }
             });
         } catch (Exception e) {
             e.printStackTrace();
         }
-    }
-
-    private boolean isBlacklistedUrl(String url) {
-        if (url == null) return false;
-        String lower = url.toLowerCase();
-        return lower.contains("youtube") || lower.contains("youtu.be") || lower.contains("facebook") ||
-                lower.contains("instagram") || lower.contains("blog.naver.com");
-    }
-
-    // 🔒 허용된 도메인 목록 — 반드시 "정확히 이 호스트이거나, 이 호스트의 서브도메인"일 때만
-    // 통과시킨다. 예전에는 URL 문자열 전체에 이 글자들이 "포함"되기만 해도 통과였어서
-    // https://공격자도메인.com/?x=u2math.co.kr 같은 URL도 내부 웹뷰(전역 JS 브릿지 노출 상태)에
-    // 그대로 로드될 수 있었다.
-    // http → https 업그레이드가 서버 리다이렉트와 맞물려 무한 반복되는 걸 막기 위한 기록
-    private String lastUpgradedUrl = null;
-    private long lastUpgradedAt = 0;
-
-    private static final String[] ALLOWED_HOSTS = {
-            "u2mkst.github.io", "u2math.co.kr", "mathflat.com", "mathflat.co.kr"
-    };
-
-    private boolean isExternalUrl(String url) {
-        if (url == null) return true;
-        String host = Uri.parse(url).getHost();
-        if (host == null) return true;
-        host = host.toLowerCase();
-        for (String allowed : ALLOWED_HOSTS) {
-            if (host.equals(allowed) || host.endsWith("." + allowed)) {
-                return false;
-            }
-        }
-        return true;
     }
 
     // 🔒 JS 문자열 리터럴에 값을 끼워 넣기 전, 따옴표/역슬래시 등을 이스케이프한다.
@@ -1535,19 +1849,6 @@ public class MainActivity extends AppCompatActivity {
                 "    }, 150);" +
                 "})()";
         view.evaluateJavascript(jsCode, null);
-    }
-
-    private void checkAndToggleHomeButton(String url) {
-        if (url == null || homeFloatingButton == null) return;
-        if (isHomeButtonHidden) return; // 새로고침 전까지는 사용자가 숨긴 상태를 유지
-
-        Uri uri = Uri.parse(url);
-        String path = uri.getPath();
-
-        boolean isExactHomePage = (path != null && (path.equals("/home") || path.equals("/home/")));
-        boolean shouldHideButton = url.contains("u2mkst.github.io") && isExactHomePage;
-
-        runOnUiThread(() -> homeFloatingButton.setVisibility(shouldHideButton ? View.GONE : View.VISIBLE));
     }
 
     private void hideSystemUI() {
@@ -1625,29 +1926,40 @@ public class MainActivity extends AppCompatActivity {
         public boolean isEarphonesPlugged() { return MainActivity.this.isEarphonesPlugged(); }
 
         @JavascriptInterface
-        public void checkEarphonesBeforeVideo() {
-            runOnUiThread(() -> {
-                if (!isEarphonesPlugged()) {
-                    AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-                    if (audioManager != null) {
-                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0);
-                    }
+        public void checkEarphonesBeforeVideo() { showEarphoneRequiredDialog(); }
+    }
 
-                    new AlertDialog.Builder(MainActivity.this)
-                            .setTitle("🎧 이어폰 착용 안내")
-                            .setMessage("스마트룸 에티켓을 위해 이어폰을 반드시 착용해 주세요.\n이어폰이 연결되지 않으면 영상이 재생되지 않습니다.")
-                            .setCancelable(false)
-                            .setPositiveButton("확인", (dialog, which) -> dialog.dismiss())
-                            .show();
+    // 🎧 모든 사이트(탭)에 열려 있는 최소 브릿지 — 영상 재생 전 이어폰 확인만 할 수 있다.
+    // 로그인 정보 전달 같은 앱 연동은 AndroidApp(우리 사이트 전용)에만 있다.
+    private class KpGuard {
+        @JavascriptInterface
+        public boolean isEarphonesPlugged() { return MainActivity.this.isEarphonesPlugged(); }
+
+        @JavascriptInterface
+        public void checkEarphonesBeforeVideo() { showEarphoneRequiredDialog(); }
+    }
+
+    private void showEarphoneRequiredDialog() {
+        runOnUiThread(() -> {
+            if (!isEarphonesPlugged()) {
+                AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                if (audioManager != null) {
+                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0);
                 }
-            });
-        }
+
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("🎧 이어폰 착용 안내")
+                        .setMessage("스마트룸 에티켓을 위해 이어폰을 반드시 착용해 주세요.\n이어폰이 연결되지 않으면 영상이 재생되지 않습니다.")
+                        .setCancelable(false)
+                        .setPositiveButton("확인", (dialog, which) -> dialog.dismiss())
+                        .show();
+            }
+        });
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        persistStudyTime();
 
         try {
             if (screenOffReceiver != null) unregisterReceiver(screenOffReceiver);
